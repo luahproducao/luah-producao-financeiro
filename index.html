@@ -1154,6 +1154,37 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
   </div>
 </div>
 
+<!-- MODAL LANÇAR SHOW A PARTIR DE TEXTO -->
+<div id="modal-texto-show" style="display:none;position:fixed;inset:0;z-index:220;background:rgba(5,5,7,.88);backdrop-filter:blur(12px);align-items:flex-end;justify-content:center">
+  <div style="background:var(--s2);border:1px solid var(--line2);border-top-left-radius:20px;border-top-right-radius:20px;padding:22px 18px 36px;width:100%;max-width:480px;max-height:92vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800">Lançar show a partir de texto</div><button onclick="fecharTextoShow()" style="background:var(--s3);border:1px solid var(--line2);border-radius:50%;width:30px;height:30px;color:var(--t2);font-size:16px;cursor:pointer">×</button></div>
+    <div style="font-size:12px;color:var(--t2);line-height:1.55;margin-bottom:10px">Cole a descrição do evento. O app identifica os campos, mostra uma prévia para conferência e seleciona toda a banda cadastrada por padrão.</div>
+    <textarea id="texto-show-input" rows="9" placeholder="Ex.:
+Confraternização Colaboradores Iberostar 2026
+
+Formato: Banda (formato Noite Branca com Percussão)
+Local: Hotel Iberostar Praia do Forte
+Tocar um repertório eclético, pop, axé e arrocha bem animado.
+
+Data: 18/12/2026
+Horário da passagem de som: 16h
+Horário do show: 23:30
+Tempo: Uma hora e meia de show"></textarea>
+    <button class="btn pri" onclick="interpretarTextoShow()" style="margin-top:8px">Identificar campos</button>
+    <div id="texto-show-resultado" style="display:none;margin-top:14px">
+      <div class="sl" style="margin-top:0">Conferir lançamento</div>
+      <div class="r2"><div class="fg"><label>Nome do show</label><input id="txts-nome"></div><div class="fg"><label>Local</label><input id="txts-local"></div></div>
+      <div class="r2"><div class="fg"><label>Data</label><input id="txts-data" type="date"></div><div class="fg"><label>Formato</label><input id="txts-formato"></div></div>
+      <div class="r2"><div class="fg"><label>Passagem de som</label><input id="txts-passagem" type="time"></div><div class="fg"><label>Início do show</label><input id="txts-hora" type="time"></div></div>
+      <div class="r2"><div class="fg"><label>Duração</label><input id="txts-duracao"></div><div class="fg"><label>Valor bruto (opcional)</label><input id="txts-valor" type="number" inputmode="decimal"></div></div>
+      <div class="fg"><label>Repertório / observações</label><textarea id="txts-obs" rows="3"></textarea></div>
+      <div style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div class="sl" style="margin:0">Equipe do show</div><button class="btn sm ghost" onclick="marcarTodaEquipeTexto()">Selecionar todos</button></div><div id="txts-equipe" style="display:flex;flex-direction:column;gap:6px"></div></div>
+      <button class="btn pri" onclick="salvarShowTexto()" style="margin-top:14px">Adicionar à agenda</button>
+    </div>
+    <div style="height:8px"></div><button class="btn ghost" onclick="fecharTextoShow()">Cancelar</button>
+  </div>
+</div>
+
 <!-- MODAL BACKUP E RESTAURO (v17) -->
 <div id="modal-backup" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(5,5,7,.88);backdrop-filter:blur(12px);align-items:flex-end;justify-content:center">
   <div style="background:var(--s2);border:1px solid var(--line2);border-top-left-radius:20px;border-top-right-radius:20px;padding:22px 18px 36px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
@@ -1256,6 +1287,10 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
     </button>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+    <button onclick="abrirTextoShow()" style="background:var(--s2);border:1px solid rgba(200,180,120,.25);border-radius:var(--r);padding:14px;text-align:left;color:var(--tx);cursor:pointer;font-family:Inter">
+      <div style="font-size:18px;margin-bottom:6px">＋</div>
+      <div style="font-size:13px;font-weight:600">Lançar por texto</div>
+    </button>
     <button onclick="goFromMore('conexao')" style="background:var(--s2);border:1px solid rgba(200,180,120,.25);border-radius:var(--r);padding:14px;text-align:left;color:var(--tx);cursor:pointer;font-family:Inter">
       <div style="font-size:18px;margin-bottom:6px"></div>
       <div style="font-size:13px;font-weight:600">Conexão</div>
@@ -3199,6 +3234,19 @@ function renderRel(){
       ${mb.pags.sort((a,b)=>a.dt.localeCompare(b.dt)).map(p=>`<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--t2);padding:4px 0;border-bottom:1px solid var(--line)">${fmtD(p.dt)} · ${p.ref}${p.obs?' · '+p.obs:''}<b style="color:var(--rose)">-${fmt(p.val)}</b></div>`).join('')}
     </div>`).join('');
 
+  // Resumo descritivo dos shows realizados no período.
+  const realizados=showsP.filter(s=>s.data<=today());
+  const porLocal={};
+  realizados.forEach(s=>{const k=(s.local||'Local não informado').trim();if(!porLocal[k])porLocal[k]={nome:k,qtd:0,bruto:0,liq:0};porLocal[k].qtd++;porLocal[k].bruto+=+(s.valor||0);porLocal[k].liq+=+(s.liq||0);});
+  const porGrupo={};
+  realizados.forEach(s=>{const k=s.serieId?'serie:'+s.serieId:'avulsos';const nome=s.serieId?(DB.series?.[s.serieId]?.nome||'Série sem nome'):'Shows avulsos';if(!porGrupo[k])porGrupo[k]={nome,qtd:0,bruto:0,liq:0};porGrupo[k].qtd++;porGrupo[k].bruto+=+(s.valor||0);porGrupo[k].liq+=+(s.liq||0);});
+  const localHtml=Object.values(porLocal).sort((a,b)=>b.liq-a.liq).map(g=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px;color:var(--t2)"><span><b style="color:var(--tx)">${escH(g.nome)}</b><br>${g.qtd} show(s) · bruto ${fmt(g.bruto)}</span><b style="color:var(--teal);white-space:nowrap">${fmt(g.liq)} líq.</b></div>`).join('');
+  const grupoHtml=Object.values(porGrupo).sort((a,b)=>b.liq-a.liq).map(g=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px;color:var(--t2)"><span><b style="color:var(--tx)">${escH(g.nome)}</b><br>${g.qtd} show(s) · bruto ${fmt(g.bruto)}</span><b style="color:var(--teal);white-space:nowrap">${fmt(g.liq)} líq.</b></div>`).join('');
+  const statusPagHtml=arr(DB.equipe).map(m=>{
+    const itens=realizados.filter(s=>escList(s).some(x=>x.mbId===m.id)).map(s=>{const e=escList(s).find(x=>x.mbId===m.id);const previsto=+(e?.val||0);const pago=arr(DB.pags).filter(p=>p.mbId===m.id&&p.showRef===s.id).reduce((a,p)=>a+(+p.val||0),0);return{show:s,previsto,pago,pendente:Math.max(0,previsto-pago)};}).filter(x=>x.previsto>0);
+    const previsto=itens.reduce((a,x)=>a+x.previsto,0),pago=itens.reduce((a,x)=>a+x.pago,0),pendente=Math.max(0,previsto-pago);return {m,itens,previsto,pago,pendente};
+  }).filter(x=>x.itens.length).map(x=>`<div style="background:var(--s3);border:1px solid var(--line);border-radius:var(--rs);padding:11px 13px;margin-bottom:7px"><div style="display:flex;justify-content:space-between;gap:8px"><b>${escH(x.m.nome)}</b><b style="color:${x.pendente?'var(--rose)':'var(--teal)'}">${x.pendente?'Pendente '+fmt(x.pendente):'Tudo pago'}</b></div><div style="font-size:11px;color:var(--t2);margin-top:4px">Previsto: <b>${fmt(x.previsto)}</b> · Pago: <b style="color:var(--teal)">${fmt(x.pago)}</b></div>${x.itens.map(y=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-top:1px solid var(--line);margin-top:6px;font-size:11px;color:var(--t2)"><span>${fmtD(y.show.data)} · ${escH(y.show.nome)}${y.show.local?' · '+escH(y.show.local):''}</span><b style="color:${y.pendente?'var(--rose)':'var(--teal)'};white-space:nowrap">${y.pendente?'Falta '+fmt(y.pendente):'Pago '+fmt(y.pago)}</b></div>`).join('')}</div>`).join('');
+
   // Previsão de entradas futuras (mês a mês)
   const hoje=today();
   const prevMes={};
@@ -3218,6 +3266,15 @@ function renderRel(){
   const prosPend=arr(DB.equipe).filter(m=>m.pro>0);
 
   set('rel-body',`
+    <div class="card">
+      <div class="sl" style="margin-top:0">Resumo de shows realizados — ${label}</div>
+      <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--t2)"><span>Quantidade realizada</span><b style="color:var(--tx)">${realizados.length}</b></div>
+      <div style="display:flex;justify-content:space-between;padding:7px 0;font-size:13px;color:var(--t2)"><span>Montante líquido realizado</span><b style="color:var(--teal)">${fmt(realizados.reduce((a,b)=>a+(b.liq||0),0))}</b></div>
+      ${localHtml?`<div class="sl" style="margin-top:12px">Por local</div>${localHtml}`:'<div style="padding-top:8px;font-size:12px;color:var(--t3)">Nenhum show realizado neste período.</div>'}
+      ${grupoHtml?`<div class="sl" style="margin-top:12px">Montante por grupo</div>${grupoHtml}`:''}
+    </div>
+    ${statusPagHtml?`<div class="card"><div class="sl" style="margin-top:0">Pagamentos da equipe — pago e pendente</div>${statusPagHtml}</div>`:''}
+
     <div class="card">
       <div class="sl" style="margin-top:0">Shows — ${label}</div>
       <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--t2)"><span>Quantidade</span><b style="color:var(--tx)">${showsP.length}</b></div>
@@ -3896,7 +3953,7 @@ function abrirDetalheShow(id){
   const status=showRecebStatus(sh),nota=showTemNota(sh);
   const parcelHtml=ps.length?ps.map(p=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:11px"><span>${fmtD(p.data)} · ${p.status==='recebida'?'Recebida':'Prevista'}${p.obs?' · '+escH(p.obs):''}</span><b style="color:${p.status==='recebida'?'var(--teal)':'var(--amber)'}">${fmt(p.valor)}</b></div>`).join(''):'<div style="font-size:11px;color:var(--t3)">Nenhum recebimento registado.</div>';
   const equipe=escList(sh).length?escList(sh).map(m=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px"><span>${escH(m.nome||m.mbId||'Músico')}</span><b style="color:var(--sky)">${fmt(m.val||0)}</b></div>`).join(''):'<div style="font-size:11px;color:var(--t3)">Nenhum músico escalado.</div>';
-  $('detalhe-show-conteudo').innerHTML=`<div style="margin-bottom:14px"><div style="font-size:19px;font-weight:800">${escH(sh.nome||'Show sem nome')}</div><div style="font-size:12px;color:var(--t2);margin-top:4px">${fmtD(sh.data)}${sh.hora?' · '+sh.hora:''}${sh.local?' · '+escH(sh.local):''}</div><div style="margin-top:8px"><span class="bdg ${nota?'b':'a'}">${nota?'Nota emitida':'Sem nota'}</span> <span class="bdg ${status==='Recebido'?'g':status==='Parcial'?'b':'a'}">${status}</span></div></div>
+  $('detalhe-show-conteudo').innerHTML=`<div style="margin-bottom:14px"><div style="font-size:19px;font-weight:800">${escH(sh.nome||'Show sem nome')}</div><div style="font-size:12px;color:var(--t2);margin-top:4px">${fmtD(sh.data)}${sh.hora?' · show '+sh.hora:''}${sh.local?' · '+escH(sh.local):''}</div>${sh.formato||sh.passagemSom||sh.duracao?`<div style="font-size:11px;color:var(--t2);line-height:1.6;margin-top:5px">${sh.formato?'Formato: '+escH(sh.formato):''}${sh.passagemSom?' · Passagem: '+sh.passagemSom:''}${sh.duracao?' · Duração: '+escH(sh.duracao):''}</div>`:''}<div style="margin-top:8px"><span class="bdg ${nota?'b':'a'}">${nota?'Nota emitida':'Sem nota'}</span> <span class="bdg ${status==='Recebido'?'g':status==='Parcial'?'b':'a'}">${status}</span></div></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:14px">${[['Bruto',bruto,'var(--gold)'],['Imposto',imp,'var(--rose)'],['Líquido',liq,'var(--teal)'],['Saldo a receber',saldo,saldo?'var(--amber)':'var(--teal)']].map(x=>`<div style="background:var(--s3);border:1px solid var(--line);border-radius:9px;padding:9px"><div style="font-size:10px;color:var(--t3)">${x[0]}</div><b style="display:block;margin-top:4px;color:${x[2]}">${fmt(x[1])}</b></div>`).join('')}</div>
   <div class="card" style="padding:10px;margin-bottom:9px"><div class="sl" style="margin:0 0 5px">Recebimento do contratante</div><div style="font-size:11px;color:var(--t2);margin-bottom:5px">Termo: <b>${sh.termo==='vista'?'À vista':sh.termo==='permuta'?'Permuta':sh.termo==='50-50'?'50/50':(sh.prazo||30)+' dias'}</b> · Previsto: <b>${fmtD(sh.recData)}</b></div>${parcelHtml}</div>
   <div class="card" style="padding:10px;margin-bottom:9px"><div class="sl" style="margin:0 0 5px">Músicos e valores previstos</div>${equipe}</div>
@@ -3921,7 +3978,7 @@ function showItem(sh){
       </div>
       <div style="flex:1;min-width:0">
         <div style="font-size:14px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sh.nome}</div>
-        <div style="font-size:11px;color:var(--t2);margin-top:2px">${sh.hora||''}${sh.local?' · '+sh.local:''} · ${sh.tipo}${sh.serie?' · Série':''}</div>
+        <div style="font-size:11px;color:var(--t2);margin-top:2px">${sh.hora||''}${sh.local?' · '+sh.local:''}${sh.passagemSom?' · passagem '+sh.passagemSom:''}${sh.duracao?' · '+sh.duracao:''} · ${sh.tipo}${sh.serie?' · Série':''}</div>
       </div>
       <span style="font-size:10px;font-weight:700;padding:4px 10px;border-radius:20px;background:${stColor}18;color:${stColor};border:1px solid ${stColor}44;white-space:nowrap">${stLabel}</span>
     </div>
@@ -4005,11 +4062,53 @@ function rShows(){
     `<div class="empty"><div style="font-size:32px;margin-bottom:10px"><svg viewBox="0 0 24 24" fill="none" stroke="rgba(217,192,136,.9)" stroke-width="1.6" stroke-linecap="round" style="width:34px;height:34px"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div><div>Nenhum show cadastrado.<br>Toque em <b>+ Show</b> para adicionar.</div></div>`;
 }
 
+/* ─── LANÇAMENTO DE SHOW A PARTIR DE TEXTO ─────── */
+function abrirTextoShow(){ closeMore(); $('modal-texto-show').style.display='flex'; $('texto-show-input').focus(); }
+function fecharTextoShow(){ $('modal-texto-show').style.display='none'; }
+function textoLinha(text,re){ const m=text.match(re); return m ? m[1].trim() : ''; }
+function dataTextoShow(v){
+  if(!v)return '';
+  let m=v.match(/(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?/);
+  if(!m)return '';
+  let y=+(m[3]||new Date().getFullYear()); if(y<100)y+=2000;
+  return `${y}-${String(+m[2]).padStart(2,'0')}-${String(+m[1]).padStart(2,'0')}`;
+}
+function horaTextoShow(v){ const m=(v||'').match(/(\d{1,2})(?:[:hH](\d{2}))?/); return m ? `${String(+m[1]).padStart(2,'0')}:${String(+(m[2]||0)).padStart(2,'0')}` : ''; }
+function interpretarTextoShow(){
+  const text=$('texto-show-input').value.trim(); if(!text){toast('Cole o texto do show primeiro','err');return;}
+  const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  const nome=lines.find(x=>!/:/.test(x)&&!/^tocar\b/i.test(x)&&!/^formato\b/i.test(x)&&!/^data\b/i.test(x)&&!/^hor[áa]rio\b/i.test(x)&&!/^tempo\b/i.test(x))||'Show sem nome';
+  const local=textoLinha(text,/^\s*(?:local|onde|espaço|espaco)\s*:\s*(.+)$/im);
+  const formato=textoLinha(text,/^\s*formato\s*:\s*(.+)$/im);
+  const data=dataTextoShow(textoLinha(text,/^\s*data\s*:\s*(.+)$/im));
+  const passagem=horaTextoShow(textoLinha(text,/(?:passagem\s+de\s+som|soundcheck)\s*:\s*(.+)$/im));
+  const hora=horaTextoShow(textoLinha(text,/(?:hor[áa]rio\s+do\s+show|in[íi]cio\s+do\s+show|hor[áa]rio)\s*:\s*(.+)$/im));
+  const duracao=textoLinha(text,/^\s*tempo\s*:\s*(.+)$/im);
+  const obs=lines.filter(x=>/^(tocar|repert[óo]rio|observa[çc][õo]es?)\b/i.test(x)).join(' ');
+  $('txts-nome').value=nome;$('txts-local').value=local;$('txts-formato').value=formato;$('txts-data').value=data;$('txts-passagem').value=passagem;$('txts-hora').value=hora;$('txts-duracao').value=duracao;$('txts-obs').value=obs;
+  $('texto-show-resultado').style.display='block'; renderEquipeTexto(); toast('Campos identificados — confira antes de adicionar');
+}
+function renderEquipeTexto(){
+  const e=$('txts-equipe'); if(!e)return; const all=arr(DB.equipe);
+  e.innerHTML=all.length?all.map(m=>`<label style="display:flex;align-items:center;gap:8px;background:var(--s3);border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:12px"><input class="txts-mb" type="checkbox" value="${m.id}" checked style="width:auto"><span><b>${escH(m.nome)}</b><small style="display:block;color:var(--t3)">${escH(m.fn||'')}</small></span></label>`).join(''):'<div style="font-size:12px;color:var(--t3)">Nenhum membro cadastrado.</div>';
+}
+function marcarTodaEquipeTexto(){ document.querySelectorAll('.txts-mb').forEach(x=>x.checked=true); }
+async function salvarShowTexto(){
+  const nome=$('txts-nome').value.trim(),data=$('txts-data').value||today(); if(!nome){toast('Informe o nome do show','err');return;}
+  const valor=+$('txts-valor').value||0, ids=[...document.querySelectorAll('.txts-mb:checked')].map(x=>x.value);
+  const escalacao=ids.filter(id=>DB.equipe[id]).map(id=>{const m=DB.equipe[id];return {mbId:id,nome:m.nome,fn:m.fn,val:0,manual:false};});
+  const id=uid(); const obs=[$('txts-formato').value.trim(),$('txts-passagem').value?`Passagem de som: ${$('txts-passagem').value}`:'',$('txts-duracao').value?`Duração: ${$('txts-duracao').value}`:'',$('txts-obs').value.trim()].filter(Boolean).join(' · ');
+  DB.shows[id]={id,nome,data,hora:$('txts-hora').value||'20:00',passagemSom:$('txts-passagem').value||'',duracao:$('txts-duracao').value.trim(),formato:$('txts-formato').value.trim(),valor,liq:+(valor*(1-ImpostoConfig())).toFixed(2),imp:+(valor*ImpostoConfig()).toFixed(2),prazo:30,termo:'30',tipo:'Outro',obs,local:$('txts-local').value.trim(),status:'agendado',recData:addDays(data,30),serie:false,falta:valor?[]:['valor'],escalacao};
+  guardarLocal($('txts-local').value); await save(); fecharTextoShow(); $('texto-show-input').value='';$('texto-show-resultado').style.display='none'; render(); toast(`Show adicionado à agenda · ${escalacao.length} integrante(s)`);
+}
+
 /* ─── NF MENSAL DE SÉRIES ─────────────────────────
    Chave: serieId_YYYY-MM
    Campos: id, serieId, mesRef (YYYY-MM), dtEmissao, dtRecebimento, valor, liq, status
 ──────────────────────────────────────────────────── */
 function nfKey(serieId, mesRef){ return serieId+'_'+mesRef; }
+function nfPrazoFinanceiro(n){ return n?.dtPrazoFinanceiro || n?.dtEmissao || ''; }
+function nfPrazoPagamento(n){ return n?.dtRecebimento || (nfPrazoFinanceiro(n) ? addDays(nfPrazoFinanceiro(n),30) : ''); }
 
 function calcNfMes(serieId, mesRef){
   // Soma os shows da série naquele mês
@@ -4025,8 +4124,10 @@ function calcNfMes(serieId, mesRef){
   return {qtShows: shows.length, valor, liq};
 }
 
-async function emitirNfMensal(serieId, mesRef, dtEmissao, desc){
+async function emitirNfMensal(serieId, mesRef, dtEmissao, dtPrazoFinanceiro, desc){
   if(!dtEmissao){ toast('Informe a data de emissão da NF','err'); return; }
+  dtPrazoFinanceiro = dtPrazoFinanceiro || dtEmissao;
+  if(dtPrazoFinanceiro < dtEmissao){ toast('O prazo do financeiro não pode ser anterior à emissão da NF','err'); return; }
   const key = nfKey(serieId, mesRef);
   const calc = calcNfMes(serieId, mesRef);
   if(!calc.qtShows){ toast('Nenhum show desta série neste mês','err'); return; }
@@ -4034,19 +4135,22 @@ async function emitirNfMensal(serieId, mesRef, dtEmissao, desc){
   DB.nfMensal[key] = {
     id: key, serieId, mesRef,
     dtEmissao,
-    dtRecebimento: addDays(dtEmissao, 30),
+    dtPrazoFinanceiro,
+    dtRecebimento: addDays(dtPrazoFinanceiro, 30),
     valor: calc.valor,
     liq: calc.liq,
     qtShows: calc.qtShows,
     tipo: 'serie',
     desc: (desc||'').trim()
   };
-   await save(); toast('NF da série emitida! Recebimento em '+fmtD(addDays(dtEmissao,30))); render();
+   await save(); toast('NF da série emitida! Pagamento previsto em '+fmtD(addDays(dtPrazoFinanceiro,30))); render();
 }
 /* NF individual de UM show da série (mesma lógica, chave separada) */
 function nfShowKey(serieId, mesRef, showId){ return serieId+'_'+mesRef+'_'+showId; }
-async function emitirNfShow(serieId, mesRef, showId, dtEmissao, desc){
+async function emitirNfShow(serieId, mesRef, showId, dtEmissao, dtPrazoFinanceiro, desc){
   if(!dtEmissao){ toast('Informe a data de emissão da NF','err'); return; }
+  dtPrazoFinanceiro = dtPrazoFinanceiro || dtEmissao;
+  if(dtPrazoFinanceiro < dtEmissao){ toast('O prazo do financeiro não pode ser anterior à emissão da NF','err'); return; }
   const s = DB.shows[showId];
   if(!s){ toast('Show não encontrado','err'); return; }
   const key = nfShowKey(serieId, mesRef, showId);
@@ -4054,7 +4158,8 @@ async function emitirNfShow(serieId, mesRef, showId, dtEmissao, desc){
   DB.nfMensal[key] = {
     id: key, serieId, mesRef, showId,
     dtEmissao,
-    dtRecebimento: addDays(dtEmissao, 30),
+    dtPrazoFinanceiro,
+    dtRecebimento: addDays(dtPrazoFinanceiro, 30),
     valor: s.valor||0,
     liq: s.liq||0,
     qtShows: 1,
@@ -4156,8 +4261,8 @@ function rSeries(){
             <span class="bdg ${nfSerie.status==='recebida'?'g':'b'}">${nfSerie.status==='recebida'?'Recebida':'Emitida'}</span>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;color:var(--t2);margin-bottom:10px">
-            <div>Emitida em<br><b style="font-size:13px;color:var(--tx)">${fmtD(nfSerie.dtEmissao)}</b></div>
-            <div>Recebimento previsto<br><b style="font-size:13px;color:${nfSerie.status==='recebida'?'var(--teal)':'var(--gold)'}">${fmtD(nfSerie.dtRecebimento)}</b></div>
+            <div>Emitida em<br><b style="font-size:13px;color:var(--tx)">${fmtD(nfSerie.dtEmissao)}</b><br><span style="font-size:10px;color:var(--t3)">Prazo financeiro: ${fmtD(nfPrazoFinanceiro(nfSerie))}</span></div>
+            <div>Pagamento previsto<br><b style="font-size:13px;color:${nfSerie.status==='recebida'?'var(--teal)':'var(--gold)'}">${fmtD(nfPrazoPagamento(nfSerie))}</b></div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${nfSerie.status!=='recebida'?`<button class="btn sm g" onclick="marcarNfRecebida('${key}')">Marcar recebida</button>`:''}
@@ -4173,14 +4278,18 @@ function rSeries(){
           <div style="font-size:11px;color:var(--t3);margin-bottom:9px">${calc.qtShows} shows · ${fmt(calc.valor)} bruto · ${fmt(calc.liq)} líquido</div>
           <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
             <div class="fg" style="flex:1;margin-bottom:0;min-width:120px">
-              <label style="font-size:9px;font-weight:700;color:var(--t3);text-transform:uppercase">Quando lançar a nota</label>
+              <label style="font-size:9px;font-weight:700;color:var(--t3);text-transform:uppercase">Data de emissão/envio</label>
               <input type="date" id="nf-dt-${key}" style="font-size:12px;padding:7px 9px">
+            </div>
+            <div class="fg" style="flex:1;margin-bottom:0;min-width:120px">
+              <label style="font-size:9px;font-weight:700;color:var(--t3);text-transform:uppercase">Prazo do financeiro</label>
+              <input type="date" id="nf-pz-${key}" style="font-size:12px;padding:7px 9px">
             </div>
             <div class="fg" style="flex:1;margin-bottom:0;min-width:120px">
               <label style="font-size:9px;font-weight:700;color:var(--t3);text-transform:uppercase">Descrição (opcional)</label>
               <input type="text" id="nf-ds-${key}" placeholder="ex: NF julho IberoStar" style="font-size:12px;padding:7px 9px">
             </div>
-            <button class="btn sm on" style="white-space:nowrap" onclick="emitirNfMensal('${r.id}','${mes}',$('nf-dt-${key}').value,$('nf-ds-${key}')?.value)">Emitir NF da série</button>
+            <button class="btn sm on" style="white-space:nowrap" onclick="emitirNfMensal('${r.id}','${mes}',$('nf-dt-${key}').value,$('nf-pz-${key}').value,$('nf-ds-${key}')?.value)">Emitir NF da série</button>
           </div>
         </div>`;
       }
@@ -4212,9 +4321,11 @@ async function abrirNfShow(serieId, mesRef, showId){
   const dtDefault = addDays(s.data, 7);
   const dt = prompt('Data de emissão da NF (AAAA-MM-DD):', dtDefault);
   if(!dt) return;
+  const prazo = prompt('Prazo do financeiro para lançar a NF (AAAA-MM-DD):', dt);
+  if(!prazo) return;
   let desc = null;
   try{ desc = prompt('Descrição do lançamento (opcional):', 'NF individual — '+s.nome); }catch(e){}
-  await emitirNfShow(serieId, mesRef, showId, dt, desc||'');
+  await emitirNfShow(serieId, mesRef, showId, dt, prazo, desc||'');
 }function rEq(){
   const e=$('lista-eq');if(!e)return;
   const eq=arr(DB.equipe);
