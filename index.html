@@ -1176,7 +1176,8 @@ Tempo: Uma hora e meia de show"></textarea>
       <div class="r2"><div class="fg"><label>Nome do show</label><input id="txts-nome"></div><div class="fg"><label>Local</label><input id="txts-local"></div></div>
       <div class="r2"><div class="fg"><label>Data</label><input id="txts-data" type="date"></div><div class="fg"><label>Formato</label><input id="txts-formato"></div></div>
       <div class="r2"><div class="fg"><label>Passagem de som</label><input id="txts-passagem" type="time"></div><div class="fg"><label>Início do show</label><input id="txts-hora" type="time"></div></div>
-      <div class="r2"><div class="fg"><label>Duração</label><input id="txts-duracao"></div><div class="fg"><label>Valor bruto (opcional)</label><input id="txts-valor" type="number" inputmode="decimal"></div></div>
+      <div class="r2"><div class="fg"><label>Duração — horas</label><input id="txts-horas" type="number" min="0" max="24" step="1" inputmode="numeric" placeholder="ex: 1"></div><div class="fg"><label>Duração — minutos</label><input id="txts-minutos" type="number" min="0" max="59" step="1" inputmode="numeric" placeholder="ex: 30"></div></div>
+      <div class="r2"><div class="fg"><label>Duração identificada</label><input id="txts-duracao" readonly></div><div class="fg"><label>Valor bruto (opcional)</label><input id="txts-valor" type="number" inputmode="decimal"></div></div>
       <div class="fg"><label>Repertório / observações</label><textarea id="txts-obs" rows="3"></textarea></div>
       <div style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div class="sl" style="margin:0">Equipe do show</div><button class="btn sm ghost" onclick="marcarTodaEquipeTexto()">Selecionar todos</button></div><div id="txts-equipe" style="display:flex;flex-direction:column;gap:6px"></div></div>
       <button class="btn pri" onclick="salvarShowTexto()" style="margin-top:14px">Adicionar à agenda</button>
@@ -2175,12 +2176,18 @@ function autoDiaSerie(){
 /* ─── ARTISTA PRINCIPAL (v16b) ─── */
 function garantirArtista(){
   if(!DB.equipe)DB.equipe={};
-  const tem=Object.values(DB.equipe).some(m=>m.nome&&m.nome.toLowerCase().includes('bruno luah'));
-  if(!tem){
-    const id='eq'+uid();
-    DB.equipe[id]={id,nome:'Bruno Luah',fn:'Voz e violão',val:0,perc:0,principal:true};
-    setTimeout(()=>toast('Bruno Luah adicionado à equipa como artista principal'),300);
+  const encontrados=Object.values(DB.equipe).filter(m=>m?.nome&&m.nome.toLowerCase().replace(/\s+/g,' ').includes('bruno luah'));
+  let principal=encontrados.find(m=>m.principal)||encontrados[0];
+  let mudou=false;
+  if(!principal){ const id='eq'+uid(); principal={id,nome:'Bruno Luah',fn:'Voz e violão',val:0,perc:0,principal:true};DB.equipe[id]=principal;mudou=true;setTimeout(()=>toast('Bruno Luah adicionado à equipa como artista principal'),300); }
+  const duplicados=encontrados.filter(m=>m.id!==principal.id);
+  if(duplicados.length){
+    const ids=new Set(duplicados.map(m=>m.id));
+    Object.values(DB.shows||{}).forEach(sh=>(sh.escalacao||[]).forEach(x=>{if(ids.has(x.mbId)){x.mbId=principal.id;x.nome=principal.nome;x.fn=principal.fn;mudou=true;}}));
+    Object.values(DB.pags||{}).forEach(pg=>{if(ids.has(pg.mbId)){pg.mbId=principal.id;pg.nome=principal.nome;pg.fn=principal.fn;mudou=true;}});
+    duplicados.forEach(m=>{delete DB.equipe[m.id];mudou=true;});
   }
+  if(mudou){ saveLocal(); clearTimeout(window._dedupeArtistaTimer); window._dedupeArtistaTimer=setTimeout(()=>save(),250); }
 }
 /* ─── SUGESTÕES DE LOCAIS (v16) ─── */
 function guardarLocal(l){
@@ -4084,21 +4091,28 @@ function interpretarTextoShow(){
   const passagem=horaTextoShow(textoLinha(text,/(?:passagem\s+de\s+som|soundcheck)\s*:\s*(.+)$/im));
   const hora=horaTextoShow(textoLinha(text,/(?:hor[áa]rio\s+do\s+show|in[íi]cio\s+do\s+show|hor[áa]rio)\s*:\s*(.+)$/im));
   const duracao=textoLinha(text,/^\s*tempo\s*:\s*(.+)$/im);
+  let horas='',minutos='';
+  if(/uma hora e meia|1h30|1:30/i.test(duracao)){horas='1';minutos='30';}
+  else { const hm=duracao.match(/(\d+)\s*h(?:oras?)?(?:\s*e?\s*(\d+)\s*(?:min|m|minutos?)?)?/i); const mm=duracao.match(/(\d+)\s*(?:min|minutos)/i); if(hm){horas=hm[1];minutos=hm[2]||'0';} else if(mm){horas=String(Math.floor(+mm[1]/60));minutos=String(+mm[1]%60);} }
   const obs=lines.filter(x=>/^(tocar|repert[óo]rio|observa[çc][õo]es?)\b/i.test(x)).join(' ');
-  $('txts-nome').value=nome;$('txts-local').value=local;$('txts-formato').value=formato;$('txts-data').value=data;$('txts-passagem').value=passagem;$('txts-hora').value=hora;$('txts-duracao').value=duracao;$('txts-obs').value=obs;
+  $('txts-nome').value=nome;$('txts-local').value=local;$('txts-formato').value=formato;$('txts-data').value=data;$('txts-passagem').value=passagem;$('txts-hora').value=hora;$('txts-horas').value=horas;$('txts-minutos').value=minutos;$('txts-duracao').value=duracao;$('txts-obs').value=obs;
   $('texto-show-resultado').style.display='block'; renderEquipeTexto(); toast('Campos identificados — confira antes de adicionar');
 }
 function renderEquipeTexto(){
   const e=$('txts-equipe'); if(!e)return; const all=arr(DB.equipe);
-  e.innerHTML=all.length?all.map(m=>`<label style="display:flex;align-items:center;gap:8px;background:var(--s3);border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:12px"><input class="txts-mb" type="checkbox" value="${m.id}" checked style="width:auto"><span><b>${escH(m.nome)}</b><small style="display:block;color:var(--t3)">${escH(m.fn||'')}</small></span></label>`).join(''):'<div style="font-size:12px;color:var(--t3)">Nenhum membro cadastrado.</div>';
+  e.innerHTML=all.length?all.map(m=>`<div class="txts-mb-row" data-id="${m.id}" onclick="toggleTextoMembro('${m.id}')" style="display:flex;align-items:center;gap:8px;background:var(--s3);border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:12px;cursor:pointer;user-select:none"><input class="txts-mb" type="checkbox" value="${m.id}" checked tabindex="-1" aria-label="${escH(m.nome)}" style="width:18px;height:18px;min-width:18px;padding:0;pointer-events:none;accent-color:var(--gold)"><span><b>${escH(m.nome)}</b><small style="display:block;color:var(--t3)">${escH(m.fn||'')}</small></span></div>`).join(''):'<div style="font-size:12px;color:var(--t3)">Nenhum membro cadastrado.</div>';
 }
+function toggleTextoMembro(id){ const cb=[...document.querySelectorAll('.txts-mb')].find(x=>x.value===id); if(!cb)return; cb.checked=!cb.checked; }
 function marcarTodaEquipeTexto(){ document.querySelectorAll('.txts-mb').forEach(x=>x.checked=true); }
 async function salvarShowTexto(){
   const nome=$('txts-nome').value.trim(),data=$('txts-data').value||today(); if(!nome){toast('Informe o nome do show','err');return;}
   const valor=+$('txts-valor').value||0, ids=[...document.querySelectorAll('.txts-mb:checked')].map(x=>x.value);
   const escalacao=ids.filter(id=>DB.equipe[id]).map(id=>{const m=DB.equipe[id];return {mbId:id,nome:m.nome,fn:m.fn,val:0,manual:false};});
-  const id=uid(); const obs=[$('txts-formato').value.trim(),$('txts-passagem').value?`Passagem de som: ${$('txts-passagem').value}`:'',$('txts-duracao').value?`Duração: ${$('txts-duracao').value}`:'',$('txts-obs').value.trim()].filter(Boolean).join(' · ');
-  DB.shows[id]={id,nome,data,hora:$('txts-hora').value||'20:00',passagemSom:$('txts-passagem').value||'',duracao:$('txts-duracao').value.trim(),formato:$('txts-formato').value.trim(),valor,liq:+(valor*(1-ImpostoConfig())).toFixed(2),imp:+(valor*ImpostoConfig()).toFixed(2),prazo:30,termo:'30',tipo:'Outro',obs,local:$('txts-local').value.trim(),status:'agendado',recData:addDays(data,30),serie:false,falta:valor?[]:['valor'],escalacao};
+  const horas=Math.max(0,+$('txts-horas').value||0), minutos=Math.min(59,Math.max(0,+$('txts-minutos').value||0));
+  const duracaoTexto=$('txts-duracao').value.trim()||`${horas}h${String(minutos).padStart(2,'0')}`;
+  const obs=[$('txts-formato').value.trim(),$('txts-passagem').value?`Passagem de som: ${$('txts-passagem').value}`:'',duracaoTexto?`Duração: ${duracaoTexto}`:'',$('txts-obs').value.trim()].filter(Boolean).join(' · ');
+  const id=uid();
+  DB.shows[id]={id,nome,data,hora:$('txts-hora').value||'20:00',passagemSom:$('txts-passagem').value||'',duracao:duracaoTexto,duracaoHoras:horas,duracaoMinutos:minutos,formato:$('txts-formato').value.trim(),valor,liq:+(valor*(1-ImpostoConfig())).toFixed(2),imp:+(valor*ImpostoConfig()).toFixed(2),prazo:30,termo:'30',tipo:'Outro',obs,local:$('txts-local').value.trim(),status:'agendado',recData:addDays(data,30),serie:false,falta:valor?[]:['valor'],escalacao};
   guardarLocal($('txts-local').value); await save(); fecharTextoShow(); $('texto-show-input').value='';$('texto-show-resultado').style.display='none'; render(); toast(`Show adicionado à agenda · ${escalacao.length} integrante(s)`);
 }
 
