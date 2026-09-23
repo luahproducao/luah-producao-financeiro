@@ -563,6 +563,8 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
   <div id="d-painel" style="display:grid;gap:10px"></div>
   <div class="sl">Agenda — <span id="d-mes-label" style="color:var(--vio2);margin-left:4px"></span></div>
   <div id="d-agenda"></div>
+  <div class="sl">Calendário mensal</div>
+  <div id="d-calendario"></div>
   <div class="sl">Próximos shows</div>
   <div id="d-prox"></div>
   <div class="sl">Previsão de recebimento</div>
@@ -1340,6 +1342,7 @@ const MS=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez
 const D=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 
 let DB={shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},meta:{},nfMensal:{}};
+let _calMesRef=today().slice(0,7);
 let _syncInterval=null;
 let _syncTimer=null,idxIdeia=0;
 
@@ -3835,6 +3838,28 @@ function escList(sh){
 }
 function render(){renderNotas();rPainelShows();rPainelFin();rPainelEq();renderLocaisSugestoes();rPainel();rDash();rShows();rSeries();rEq();rPags();rPagSel();rFin();rDivs();rEquip();renderRel();renderSaude();renderCartoes();}
 
+function mudarMesCalendario(delta){
+  const [y,m]=_calMesRef.split('-').map(Number); const d=new Date(y,m-1+delta,1); _calMesRef=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderCalendarioDash();
+}
+function irMesAtualCalendario(){ _calMesRef=today().slice(0,7); renderCalendarioDash(); }
+function renderCalendarioDash(){
+  const e=$('d-calendario'); if(!e)return;
+  const [ano,mes1]=_calMesRef.split('-').map(Number), mes=mes1-1;
+  const primeiro=new Date(ano,mes,1), inicio=primeiro.getDay(), totalDias=new Date(ano,mes+1,0).getDate(), hoje=today();
+  const shows=arr(DB.shows).filter(s=>s.status!=='cancelado'&&String(s.data||'').startsWith(_calMesRef));
+  const porDia={}; shows.forEach(s=>(porDia[s.data]||(porDia[s.data]=[])).push(s));
+  const nomes=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  let cells='';
+  for(let i=0;i<inicio;i++) cells+='<div style="min-height:76px;background:rgba(10,10,13,.45);border:1px solid var(--line);border-radius:7px;opacity:.35"></div>';
+  for(let dia=1;dia<=totalDias;dia++){
+    const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`, lista=porDia[ds]||[], ehHoje=ds===hoje;
+    cells+=`<div style="min-height:76px;background:${ehHoje?'rgba(200,180,120,.08)':'var(--s2)'};border:1px solid ${ehHoje?'rgba(200,180,120,.5)':'var(--line)'};border-radius:7px;padding:6px 5px;overflow:hidden"><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;color:${ehHoje?'var(--gold)':'var(--t2)'};margin-bottom:4px">${dia}${ehHoje?' · hoje':''}</div>${lista.map(sh=>{const c=sh.status==='recebido'?'var(--teal)':sh.status==='nf'?'var(--sky)':'var(--amber)';return `<button onclick="abrirDetalheShow('${sh.id}')" title="${escH(sh.nome)}" style="display:block;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;background:${c}18;border:1px solid ${c}55;border-left:3px solid ${c};border-radius:4px;color:var(--tx);font:600 9px Inter;padding:3px 4px;margin-top:3px;cursor:pointer">${sh.hora?sh.hora+' ':''}${escH(sh.nome)}</button>`;}).join('')}</div>`;
+  }
+  const faltam=(inicio+totalDias)%7; if(faltam)for(let i=faltam;i<7;i++)cells+='<div style="min-height:76px;background:rgba(10,10,13,.45);border:1px solid var(--line);border-radius:7px;opacity:.35"></div>';
+  const label=new Date(ano,mes,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  e.innerHTML=`<div class="card" style="padding:10px;margin-bottom:10px"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px"><button class="btn sm ghost" onclick="mudarMesCalendario(-1)" style="font-size:18px;padding:3px 10px">‹</button><button onclick="irMesAtualCalendario()" style="background:transparent;border:0;color:var(--tx);font:700 14px Inter;text-transform:capitalize;cursor:pointer">${label}</button><button class="btn sm ghost" onclick="mudarMesCalendario(1)" style="font-size:18px;padding:3px 10px">›</button></div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px">${nomes.map(n=>`<div style="text-align:center;color:var(--t3);font-size:9px;font-weight:700;text-transform:uppercase;padding:2px">${n}</div>`).join('')}</div><div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px">${cells}</div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:10px;color:var(--t3)"><span><i style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--amber);margin-right:4px"></i>Agendado</span><span><i style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--sky);margin-right:4px"></i>NF emitida</span><span><i style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--teal);margin-right:4px"></i>Recebido</span></div></div>`;
+}
+
 function rDash(){
   const now=new Date(),mes=now.getMonth(),ano=now.getFullYear();
   const ms=`${ano}-${String(mes+1).padStart(2,'0')}`;
@@ -3892,6 +3917,8 @@ function rDash(){
       ${showsSemNota.length} show(s) ainda sem nota emitida · Previsão baseada no mês anterior: <b>${fmt(prevBase)}</b>
     </div>
   </div>`);
+  // Calendário mensal visual
+  renderCalendarioDash();
   // Agenda
   const ag=showsMes.sort((a,b)=>a.data.localeCompare(b.data));
   set('d-agenda',ag.length?ag.map(s=>{
