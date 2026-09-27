@@ -1001,6 +1001,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
     <div class="fg"><label>Período</label>
       <select id="rper" onchange="renderRel()"><option value="mes">Este mês</option><option value="trim">Este trimestre</option><option value="ano">Este ano</option></select>
     </div>
+    <div class="r2" style="margin-top:10px"><div class="fg" style="margin-bottom:0"><label>Grupo / série</label><select id="rgrupo" onchange="filtrarRelatorio('grupo',this.value)"><option value="">Todos os grupos</option></select></div><div class="fg" style="margin-bottom:0"><label>Local</label><select id="rlocal" onchange="filtrarRelatorio('local',this.value)"><option value="">Todos os locais</option></select></div></div>
   </div>
   <div id="rel-body"></div>
   <div class="sp"></div>
@@ -1351,6 +1352,8 @@ const today=()=>new Date().toISOString().slice(0,10);
 let _calMesRef=today().slice(0,7);
 let _calFiltroGrupo='';
 let _calFiltroLocal='';
+let _relFiltroGrupo='';
+let _relFiltroLocal='';
 const fmtD=s=>{try{return new Date(s+'T12:00').toLocaleDateString('pt-BR')}catch{return s||''}};
 const addDays=(s,n)=>{const d=new Date(s+'T12:00');d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -3205,17 +3208,29 @@ function getPeriodo(){
   if(per==='trim'){const q=Math.floor(now.getMonth()/3);return{ini:new Date(now.getFullYear(),q*3,1),fim:new Date(now.getFullYear(),q*3+3,0),label:'T'+(q+1)+'/'+now.getFullYear()};}
   return{ini:new Date(now.getFullYear(),0,1),fim:new Date(now.getFullYear(),11,31),label:'Ano '+now.getFullYear()};
 }
+function filtrarRelatorio(tipo,valor){ if(tipo==='grupo')_relFiltroGrupo=valor; else _relFiltroLocal=valor; renderRel(); }
 function renderRel(){
   const{ini,fim,label}=getPeriodo();
   const iS=ini.toISOString().slice(0,10),fS=fim.toISOString().slice(0,10);
-  const showsP=arr(DB.shows).filter(s=>s.data>=iS&&s.data<=fS&&s.status!=='cancelado').sort((a,b)=>a.data.localeCompare(b.data));
+  const todosShowsPeriodo=arr(DB.shows).filter(s=>s.data>=iS&&s.data<=fS&&s.status!=='cancelado');
+  const nomeGrupoRel=s=>s.serieId?(DB.series?.[s.serieId]?.nome||'Grupo sem nome'):'Shows avulsos';
+  const gruposRel=[...new Map(todosShowsPeriodo.map(s=>[s.serieId||'__avulsos',{id:s.serieId||'__avulsos',nome:nomeGrupoRel(s)}])).values()].sort((a,b)=>a.nome.localeCompare(b.nome));
+  const locaisRel=[...new Set(todosShowsPeriodo.map(s=>(s.local||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  if(_relFiltroGrupo&&!gruposRel.some(g=>g.id===_relFiltroGrupo))_relFiltroGrupo='';
+  if(_relFiltroLocal&&!locaisRel.includes(_relFiltroLocal))_relFiltroLocal='';
+  const filtroShowRel=s=>(!_relFiltroGrupo||(_relFiltroGrupo==='__avulsos'?!s.serieId:s.serieId===_relFiltroGrupo))&&(!_relFiltroLocal||(s.local||'').trim()===_relFiltroLocal);
+  const showsP=todosShowsPeriodo.filter(filtroShowRel).sort((a,b)=>a.data.localeCompare(b.data));
   const finP=arr(DB.fin).filter(f=>f.data>=iS&&f.data<=fS);
-  const pagP=arr(DB.pags).filter(p=>p.dt>=iS&&p.dt<=fS);
+  const idsShowsFiltrados=new Set(showsP.map(s=>s.id));
+  const pagP=arr(DB.pags).filter(p=>p.dt>=iS&&p.dt<=fS&&(!_relFiltroGrupo&&!_relFiltroLocal||!p.showRef||idsShowsFiltrados.has(p.showRef)));
+  const rg=$('rgrupo'),rl=$('rlocal');
+  if(rg)rg.innerHTML='<option value="">Todos os grupos</option>'+gruposRel.map(g=>`<option value="${escH(g.id)}" ${_relFiltroGrupo===g.id?'selected':''}>${escH(g.nome)}</option>`).join('');
+  if(rl)rl.innerHTML='<option value="">Todos os locais</option>'+locaisRel.map(l=>`<option value="${escH(l)}" ${_relFiltroLocal===l?'selected':''}>${escH(l)}</option>`).join('');
 
   const tBruto=showsP.reduce((a,b)=>a+(b.valor||0),0);
   const tImp=showsP.reduce((a,b)=>a+(b.imp||0),0);
   const tLiq=showsP.reduce((a,b)=>a+(b.liq||0),0);
-  const tCaixaShows=arr(DB.shows).filter(s=>s.status!=='cancelado').reduce((a,s)=>a+showRecebidoNoMes(s,iS.slice(0,7)),0);
+  const tCaixaShows=arr(DB.shows).filter(s=>s.status!=='cancelado'&&filtroShowRel(s)).reduce((a,s)=>a+showRecebidoNoMes(s,iS.slice(0,7)),0);
   const tRec=finP.filter(f=>f.tipo==='rec').reduce((a,b)=>a+b.valor,0);
   const tDesp=finP.filter(f=>f.tipo==='desp').reduce((a,b)=>a+b.valor,0);
   const tCasa=finP.filter(f=>f.tipo==='casa').reduce((a,b)=>a+b.valor,0);
@@ -3281,6 +3296,7 @@ function renderRel(){
   set('rel-body',`
     <div class="card">
       <div class="sl" style="margin-top:0">Resumo de shows realizados — ${label}</div>
+      ${(_relFiltroGrupo||_relFiltroLocal)?`<div style="font-size:11px;color:var(--gold);padding:5px 0 8px">Filtro ativo: ${_relFiltroGrupo?escH(gruposRel.find(g=>g.id===_relFiltroGrupo)?.nome||'grupo'):''}${_relFiltroGrupo&&_relFiltroLocal?' · ':''}${_relFiltroLocal?escH(_relFiltroLocal):''}</div>`:''}
       <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--t2)"><span>Quantidade realizada</span><b style="color:var(--tx)">${realizados.length}</b></div>
       <div style="display:flex;justify-content:space-between;padding:7px 0;font-size:13px;color:var(--t2)"><span>Montante líquido realizado</span><b style="color:var(--teal)">${fmt(realizados.reduce((a,b)=>a+(b.liq||0),0))}</b></div>
       ${localHtml?`<div class="sl" style="margin-top:12px">Por local</div>${localHtml}`:'<div style="padding-top:8px;font-size:12px;color:var(--t3)">Nenhum show realizado neste período.</div>'}
