@@ -3290,10 +3290,29 @@ function renderRel(){
   const pendShows=arr(DB.shows).filter(s=>s.recData>hoje&&s.recData<=d60&&s.status!=='recebido'&&s.status!=='cancelado'&&!s.serie).sort((a,b)=>a.recData.localeCompare(b.recData));
   const pendNFs=arr(DB.nfMensal||{}).filter(n=>n.status==='emitida'&&n.dtRecebimento>hoje&&n.dtRecebimento<=d60).sort((a,b)=>a.dtRecebimento.localeCompare(b.dtRecebimento));
 
-  // Pró-labore pendente
-  const prosPend=arr(DB.equipe).filter(m=>m.pro>0);
+  // Gráfico mensal de receitas e despesas do ano, respeitando os filtros de show.
+  const anoGraf=ini.getFullYear();
+  const mesesGraf=Array.from({length:12},(_,mi)=>{
+    const chave=`${anoGraf}-${String(mi+1).padStart(2,'0')}`;
+    const recShows=arr(DB.shows).filter(s=>s.status!=='cancelado'&&filtroShowRel(s)&&String(s.data||'').startsWith(chave)).reduce((a,s)=>a+(+s.liq||0),0);
+    const recFin=arr(DB.fin).filter(f=>f.tipo==='rec'&&String(f.data||'').startsWith(chave)).reduce((a,f)=>a+(+f.valor||0),0);
+    const despFin=arr(DB.fin).filter(f=>f.tipo!=='rec'&&String(f.data||'').startsWith(chave)).reduce((a,f)=>a+(+f.valor||0),0);
+    const despPag=arr(DB.pags).filter(pg=>String(pg.dt||'').startsWith(chave)&&(!_relFiltroGrupo&&!_relFiltroLocal||!pg.showRef||showsP.some(s=>s.id===pg.showRef))).reduce((a,pg)=>a+(+pg.val||0),0);
+    const despFat=arr(DB.faturaPagamentos).filter(pg=>String(pg.data||'').startsWith(chave)).reduce((a,pg)=>a+(+pg.valor||0),0);
+    return {chave,nome:M[mi].slice(0,3),receita:recShows+recFin,despesa:despFin+despPag+despFat};
+  });
+  const maxGraf=Math.max(1,...mesesGraf.flatMap(x=>[x.receita,x.despesa]));
+  const periodoIni=`${iS.slice(0,7)}`,periodoFim=`${fS.slice(0,7)}`;
+  const grafHtml=mesesGraf.map(x=>{const ativo=x.chave>=periodoIni&&x.chave<=periodoFim;const hr=Math.max(2,Math.round(x.receita/maxGraf*100)),hd=Math.max(2,Math.round(x.despesa/maxGraf*100));return `<div style="min-width:28px;flex:1;text-align:center;opacity:${ativo?'1':'.5'}"><div style="height:112px;display:flex;align-items:flex-end;justify-content:center;gap:2px;border-bottom:1px solid var(--line);padding:0 2px"><div title="Receitas ${fmt(x.receita)}" style="width:9px;height:${hr}%;min-height:2px;background:var(--teal);border-radius:3px 3px 0 0"></div><div title="Despesas ${fmt(x.despesa)}" style="width:9px;height:${hd}%;min-height:2px;background:var(--rose);border-radius:3px 3px 0 0"></div></div><div style="font-size:9px;color:var(--t3);margin-top:5px;text-transform:uppercase">${x.nome}</div></div>`;}).join('');
+  const totalGrafRec=mesesGraf.reduce((a,x)=>a+x.receita,0),totalGrafDesp=mesesGraf.reduce((a,x)=>a+x.despesa,0);
 
   set('rel-body',`
+    <div class="card">
+      <div class="sl" style="margin-top:0">Resumo mensal — ${anoGraf}</div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:10px">Comparativo de receitas e despesas. O período selecionado fica destacado.</div>
+      <div style="display:flex;align-items:flex-end;gap:3px;width:100%;overflow-x:auto;padding-top:4px">${grafHtml}</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--t2)"><span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--teal);margin-right:4px"></i>Receitas <b style="color:var(--teal)">${fmt(totalGrafRec)}</b></span><span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--rose);margin-right:4px"></i>Despesas <b style="color:var(--rose)">${fmt(totalGrafDesp)}</b></span></div>
+    </div>
     <div class="card">
       <div class="sl" style="margin-top:0">Resumo de shows realizados — ${label}</div>
       ${(_relFiltroGrupo||_relFiltroLocal)?`<div style="font-size:11px;color:var(--gold);padding:5px 0 8px">Filtro ativo: ${_relFiltroGrupo?escH(gruposRel.find(g=>g.id===_relFiltroGrupo)?.nome||'grupo'):''}${_relFiltroGrupo&&_relFiltroLocal?' · ':''}${_relFiltroLocal?escH(_relFiltroLocal):''}</div>`:''}
