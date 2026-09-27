@@ -1342,13 +1342,15 @@ const MS=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez
 const D=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 
 let DB={shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},meta:{},nfMensal:{}};
-let _calMesRef=today().slice(0,7);
 let _syncInterval=null;
 let _syncTimer=null,idxIdeia=0;
 
 /* ═══════ UTILS ════════════════════════════════════ */
 const fmt=v=>'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const today=()=>new Date().toISOString().slice(0,10);
+let _calMesRef=today().slice(0,7);
+let _calFiltroGrupo='';
+let _calFiltroLocal='';
 const fmtD=s=>{try{return new Date(s+'T12:00').toLocaleDateString('pt-BR')}catch{return s||''}};
 const addDays=(s,n)=>{const d=new Date(s+'T12:00');d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -1891,6 +1893,7 @@ function iniciarSync(){ carregarJB(); }
 /* ═══════ INIT ══════════════════════════════════ */
 window.addEventListener('load',()=>{
   if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+  setTimeout(()=>{ const label=$('slbl'); if(label&&label.textContent==='iniciando…'){ loadLocal(); garantirArtista(); syncUI(false,'modo local — sincronização indisponível'); render(); toast('A sincronização demorou. O aplicativo abriu em modo local.','err'); } },8000);
   
   // Verificar se tem senha cadastrada
   const temSenha = !!localStorage.getItem(SENHA_KEY);
@@ -3842,11 +3845,18 @@ function mudarMesCalendario(delta){
   const [y,m]=_calMesRef.split('-').map(Number); const d=new Date(y,m-1+delta,1); _calMesRef=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderCalendarioDash();
 }
 function irMesAtualCalendario(){ _calMesRef=today().slice(0,7); renderCalendarioDash(); }
+function filtrarCalendarioDash(tipo,valor){ if(tipo==='grupo')_calFiltroGrupo=valor; else _calFiltroLocal=valor; renderCalendarioDash(); }
 function renderCalendarioDash(){
   const e=$('d-calendario'); if(!e)return;
   const [ano,mes1]=_calMesRef.split('-').map(Number), mes=mes1-1;
   const primeiro=new Date(ano,mes,1), inicio=primeiro.getDay(), totalDias=new Date(ano,mes+1,0).getDate(), hoje=today();
-  const shows=arr(DB.shows).filter(s=>s.status!=='cancelado'&&String(s.data||'').startsWith(_calMesRef));
+  const todosMes=arr(DB.shows).filter(s=>s.status!=='cancelado'&&String(s.data||'').startsWith(_calMesRef));
+  const nomeGrupo=s=>s.serieId?(DB.series?.[s.serieId]?.nome||'Grupo sem nome'):'Shows avulsos';
+  const grupos=[...new Map(todosMes.map(s=>[s.serieId||'__avulsos',{id:s.serieId||'__avulsos',nome:nomeGrupo(s)}])).values()].sort((a,b)=>a.nome.localeCompare(b.nome));
+  const locais=[...new Set(todosMes.map(s=>(s.local||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const shows=todosMes.filter(s=>(!_calFiltroGrupo||(_calFiltroGrupo==='__avulsos'?!s.serieId:s.serieId===_calFiltroGrupo))&&(!_calFiltroLocal||(s.local||'').trim()===_calFiltroLocal));
+  if(_calFiltroGrupo&&!grupos.some(g=>g.id===_calFiltroGrupo))_calFiltroGrupo='';
+  if(_calFiltroLocal&&!locais.includes(_calFiltroLocal))_calFiltroLocal='';
   const porDia={}; shows.forEach(s=>(porDia[s.data]||(porDia[s.data]=[])).push(s));
   const nomes=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   let cells='';
@@ -3857,7 +3867,7 @@ function renderCalendarioDash(){
   }
   const faltam=(inicio+totalDias)%7; if(faltam)for(let i=faltam;i<7;i++)cells+='<div style="min-height:76px;background:rgba(10,10,13,.45);border:1px solid var(--line);border-radius:7px;opacity:.35"></div>';
   const label=new Date(ano,mes,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
-  e.innerHTML=`<div class="card" style="padding:10px;margin-bottom:10px"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px"><button class="btn sm ghost" onclick="mudarMesCalendario(-1)" style="font-size:18px;padding:3px 10px">‹</button><button onclick="irMesAtualCalendario()" style="background:transparent;border:0;color:var(--tx);font:700 14px Inter;text-transform:capitalize;cursor:pointer">${label}</button><button class="btn sm ghost" onclick="mudarMesCalendario(1)" style="font-size:18px;padding:3px 10px">›</button></div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px">${nomes.map(n=>`<div style="text-align:center;color:var(--t3);font-size:9px;font-weight:700;text-transform:uppercase;padding:2px">${n}</div>`).join('')}</div><div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px">${cells}</div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:10px;color:var(--t3)"><span><i style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--amber);margin-right:4px"></i>Agendado</span><span><i style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--sky);margin-right:4px"></i>NF emitida</span><span><i style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--teal);margin-right:4px"></i>Recebido</span></div></div>`;
+  e.innerHTML=`<div class="card" style="padding:10px;margin-bottom:10px"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px"><button class="btn sm ghost" onclick="mudarMesCalendario(-1)" style="font-size:18px;padding:3px 10px">‹</button><button onclick="irMesAtualCalendario()" style="background:transparent;border:0;color:var(--tx);font:700 14px Inter;text-transform:capitalize;cursor:pointer">${label}</button><button class="btn sm ghost" onclick="mudarMesCalendario(1)" style="font-size:18px;padding:3px 10px">›</button></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px"><select onchange="filtrarCalendarioDash('grupo',this.value)" style="font-size:11px;padding:7px 8px"><option value="">Todos os grupos</option>${grupos.map(g=>`<option value="${escH(g.id)}" ${_calFiltroGrupo===g.id?'selected':''}>${escH(g.nome)}</option>`).join('')}</select><select onchange="filtrarCalendarioDash('local',this.value)" style="font-size:11px;padding:7px 8px"><option value="">Todos os locais</option>${locais.map(l=>`<option value="${escH(l)}" ${_calFiltroLocal===l?'selected':''}>${escH(l)}</option>`).join('')}</select></div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px">${nomes.map(n=>`<div style="text-align:center;color:var(--t3);font-size:9px;font-weight:700;text-transform:uppercase;padding:2px">${n}</div>`).join('')}</div><div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px">${cells}</div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:10px;color:var(--t3)"><span><i style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--amber);margin-right:4px"></i>Agendado</span><span><i style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--sky);margin-right:4px"></i>NF emitida</span><span><i style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--teal);margin-right:4px"></i>Recebido</span><span style="margin-left:auto">${shows.length} show(s)</span></div></div>`;
 }
 
 function rDash(){
