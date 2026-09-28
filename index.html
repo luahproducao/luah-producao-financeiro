@@ -559,12 +559,12 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
   </div>
   <div class="kpi-grid" id="d-kpis"></div>
   <div id="d-resumo"></div>
+  <div class="sl" style="margin-top:14px">Calendário mensal</div>
+  <div id="d-calendario"></div>
   <div class="sl" style="margin-top:14px">Onde vai cada real de <span id="d-p-mes" style="color:var(--vio2);margin:0 4px"></span></div>
   <div id="d-painel" style="display:grid;gap:10px"></div>
   <div class="sl">Agenda — <span id="d-mes-label" style="color:var(--vio2);margin-left:4px"></span></div>
   <div id="d-agenda"></div>
-  <div class="sl">Calendário mensal</div>
-  <div id="d-calendario"></div>
   <div class="sl">Próximos shows</div>
   <div id="d-prox"></div>
   <div class="sl">Previsão de recebimento</div>
@@ -1183,7 +1183,7 @@ Tempo: Uma hora e meia de show"></textarea>
       <div class="r2"><div class="fg"><label>Duração identificada</label><input id="txts-duracao" readonly></div><div class="fg"><label>Valor bruto (opcional)</label><input id="txts-valor" type="number" inputmode="decimal"></div></div>
       <div class="fg"><label>Repertório / observações</label><textarea id="txts-obs" rows="3"></textarea></div>
       <div style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div class="sl" style="margin:0">Equipe do show</div><button class="btn sm ghost" onclick="marcarTodaEquipeTexto()">Selecionar todos</button></div><div id="txts-equipe" style="display:flex;flex-direction:column;gap:6px"></div></div>
-      <button class="btn pri" onclick="salvarShowTexto()" style="margin-top:14px">Adicionar à agenda</button>
+      <button class="btn pri" onclick="confirmarSalvarShowTexto()" style="margin-top:14px">Confirmar e adicionar à agenda</button>
     </div>
     <div style="height:8px"></div><button class="btn ghost" onclick="fecharTextoShow()">Cancelar</button>
   </div>
@@ -4176,6 +4176,16 @@ function renderEquipeTexto(){
 }
 function toggleTextoMembro(id){ const cb=[...document.querySelectorAll('.txts-mb')].find(x=>x.value===id); if(!cb)return; cb.checked=!cb.checked; }
 function marcarTodaEquipeTexto(){ document.querySelectorAll('.txts-mb').forEach(x=>x.checked=true); }
+function confirmarSalvarShowTexto(){
+  const nome=$('txts-nome').value.trim()||'Show sem nome';
+  const data=$('txts-data').value||today();
+  const local=$('txts-local').value.trim()||'Local não informado';
+  const hora=$('txts-hora').value||'Horário não informado';
+  const dur=$('txts-duracao').value.trim()||`${+$('txts-horas').value||0}h${String(+$('txts-minutos').value||0).padStart(2,'0')}`;
+  const equipe=[...document.querySelectorAll('.txts-mb:checked')].length;
+  const ok=confirm(`Confirmar lançamento deste show?\n\n${nome}\nData: ${fmtD(data)}\nLocal: ${local}\nShow: ${hora}\nDuração: ${dur}\nEquipe: ${equipe} integrante(s)\n\nOs dados serão salvos na agenda e sincronizados quando possível.`);
+  if(ok)salvarShowTexto();
+}
 async function salvarShowTexto(){
   const nome=$('txts-nome').value.trim(),data=$('txts-data').value||today(); if(!nome){toast('Informe o nome do show','err');return;}
   const valor=+$('txts-valor').value||0, ids=[...document.querySelectorAll('.txts-mb:checked')].map(x=>x.value);
