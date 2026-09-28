@@ -1344,7 +1344,7 @@ const D=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 
 let DB={shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},meta:{},nfMensal:{}};
 let _syncInterval=null;
-let _syncTimer=null,idxIdeia=0;
+let _syncTimer=null,_syncRetryTimer=null,_jbLoading=false,idxIdeia=0;
 
 /* ═══════ UTILS ════════════════════════════════════ */
 const fmt=v=>'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -1438,7 +1438,7 @@ function entrarNoApp(){
 }
 
 function sair(){
-  clearInterval(_syncTimer);
+  clearInterval(_syncTimer); pararReconexao();
   localStorage.removeItem('luah_logado');
   location.reload();
 }
@@ -1594,9 +1594,10 @@ function cleanQueue(){ if(DB._queue) delete DB._queue; }
 async function pullFromCloud(){
   const key = jbKey(), bin = jbBin();
   if(!key || !bin) return false;
+  LU.lastError='';
   try{
     const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:{'X-Master-Key':key,'X-Bin-Meta-Only':'true'}});
-    if(!rm.ok) return false;
+    if(!rm.ok){ LU.lastError='HTTP '+rm.status; return false; }
     const jm = await rm.json();
     const ver = jm.metadata?.version||0;
     if(ver < LU.cloudVer) return false; // nuvem mais antiga: não aceitar
@@ -1607,7 +1608,7 @@ async function pullFromCloud(){
         if(temDados()){ syncUI(false,'protegido'); return 'protegido'; }
         DB = {shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{}, ...DB}; cleanQueue(); LU.cloudVer = ver; persistLU(); garantirArtista(); saveLocal(); return 'vazio';
       }
-      return false;
+      LU.lastError='HTTP '+r.status; return false;
     }
     const j = await r.json();
     const d = j.record;
@@ -1628,7 +1629,7 @@ async function pullFromCloud(){
     if(merged.keptLocal && temDados()){ await save(); return 'mesclado'; }
     syncUI(true,'sync '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
     return nuvemVazia ? 'vazio' : true;
-  }catch(e){ return false; }
+  }catch(e){ LU.lastError='rede'; return false; }
 }
 
 async function atualizarApp(){
@@ -1642,7 +1643,17 @@ async function atualizarApp(){
   if((pushed==='vazio'||pushed==='protegido') && (Object.keys(DB.shows||{}).length||Object.keys(DB.fin||{}).length)){ await save(); toast('Dados deste aparelho enviados à nuvem'); }
 }
 
+function agendarReconexao(){
+  if(_syncRetryTimer||!jbKey()||!jbBin())return;
+  _syncRetryTimer=setInterval(()=>{if(navigator.onLine)carregarJB();},30000);
+}
+function pararReconexao(){if(_syncRetryTimer){clearInterval(_syncRetryTimer);_syncRetryTimer=null;}}
 async function carregarJB(){
+  if(_jbLoading)return;
+  _jbLoading=true;
+  try{ await carregarJBInterno(); } finally { _jbLoading=false; }
+}
+async function carregarJBInterno(){
   const key = jbKey(), bin = jbBin();
   if(!key || !bin){ loadLocal();garantirArtista(); render(); return; }
   // 0. Garantir dados locais em memória (no reload o DB começa vazio)
@@ -1651,7 +1662,7 @@ async function carregarJB(){
   await drainQueue(key, bin);
   // 2. Trazer da nuvem apenas se não estiver desatualizada
   const pulled = await pullFromCloud();
-  if(!pulled){ loadLocal(); garantirArtista(); syncUI(false,'offline — dados locais'); render(); return; }
+  if(!pulled){ loadLocal(); garantirArtista(); syncUI(false,`JSONBin indisponível (${LU.lastError||'sem resposta'}) — dados locais`); render(); agendarReconexao(); return; }
   // 3. Nuvem vazia (criada mas sem dados) + dados locais existentes: enviar os dados locais
   const temLocal = !!(DB.shows && Object.keys(DB.shows).length) || !!(DB.fin && Object.keys(DB.fin).length);
   const nuvemVazia = (pulled === 'vazio') || (!Object.keys(DB.shows||{}).length && !Object.keys(DB.fin||{}).length && !Object.keys(DB.equipe||{}).length);
@@ -1661,6 +1672,7 @@ async function carregarJB(){
   }
   garantirArtista();
   saveLocal();
+  pararReconexao();
   syncUI(true,'online ');
   // 3. Polling a cada 20s
   clearInterval(_syncTimer);
@@ -1669,7 +1681,7 @@ async function carregarJB(){
     await drainQueue(key, bin); // reenviar pendências primeiro
     try{
       const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:{'X-Master-Key':key,'X-Bin-Meta-Only':'true'}});
-      if(!rm.ok) return;
+      if(!rm.ok){ syncUI(false,`JSONBin indisponível (HTTP ${rm.status}) — tentando reconectar`); agendarReconexao(); return; }
       const jm = await rm.json();
       const ver = jm.metadata?.version||0;
       if(!ver || ver <= LU.cloudVer){
@@ -1677,7 +1689,7 @@ async function carregarJB(){
         return; // nada novo na nuvem
       }
       const r = await fetch(`${JB_BASE}/b/${bin}/latest`,{headers:{'X-Master-Key':key}});
-      if(!r.ok) return;
+      if(!r.ok){ syncUI(false,`JSONBin indisponível (HTTP ${r.status}) — tentando reconectar`); agendarReconexao(); return; }
       const j = await r.json(); const d = j.record;
       if(!d || typeof d !== 'object') return;
       // Proteção: nunca substituir dados locais por nuvem vazia.
