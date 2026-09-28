@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Luah"><link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Luah"><link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <meta name="theme-color" content="#050507">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
@@ -143,8 +143,17 @@ body{
 }
 
 /* ─── PAGE ───────────────────────────────────────── */
-.pg{padding:16px 16px 80px}
+.pg{padding:18px 16px calc(92px + env(safe-area-inset-bottom,0px))}
 .view{display:none}.view.on{display:block}
+
+
+/* Redesign progressivo: hierarquia, toque e telas pequenas */
+.home-quick-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0 0 14px}
+.home-quick-actions button{min-height:58px;border:1px solid var(--line2);border-radius:12px;background:linear-gradient(145deg,var(--s3),var(--s2));color:var(--tx);font:600 11px Inter;cursor:pointer;padding:8px 5px}
+.home-quick-actions button strong{display:block;color:var(--gold2);font-size:18px;margin-bottom:5px}
+.home-quick-actions button:active{transform:scale(.98);border-color:var(--gold)}
+@media (max-width:520px){.r2{grid-template-columns:1fr}.home-quick-actions{grid-template-columns:repeat(2,1fr)}input,select,textarea{font-size:16px}.btn.sm,.itab{min-height:40px}.bnav-btn{min-height:44px}.modal,.sheet{max-height:92dvh}}
+@media (min-width:720px){.pg{max-width:760px;margin:0 auto}.home-quick-actions{max-width:560px}}
 
 /* ─── SECTION LABEL ──────────────────────────────── */
 .sl{
@@ -419,7 +428,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
 </head>
 <body>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <!-- HEADER -->
 <div class="app-shell"><header class="hdr">
@@ -555,6 +564,12 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
 <div id="v-dash" class="view on">
   <div id="avisos"></div>
   <div id="d-connection-status" class="connection-card"></div>
+  <div class="home-quick-actions" aria-label="Ações rápidas">
+    <button onclick="irNovoShow()"><strong>＋</strong>Novo show</button>
+    <button onclick="irFinancas()"><strong>R$</strong>Lançar financeiro</button>
+    <button onclick="irEquipe()"><strong>♬</strong>Equipe</button>
+    <button onclick="go('rel')"><strong>▦</strong>Relatórios</button>
+  </div>
   <!-- HERO -->
   <div class="dash-hero" id="d-hero">
     <div class="dash-hero-label">Saldo de <span id="d-mes"></span></div>
@@ -1328,7 +1343,8 @@ function showBruto(s){return +(s?.valor||0);}
 function showLiquido(s){const v=showBruto(s);return +(v*(1-ImpostoConfig())).toFixed(2);}
 function showImposto(s){const v=showBruto(s);return +(v*ImpostoConfig()).toFixed(2);}
 function showParcelas(s){return Array.isArray(s?.recebimentos)?s.recebimentos.filter(p=>+p.valor>0):[];}
-function showRecebido(s){const base=showLiquido(s),ps=showParcelas(s),sum=ps.reduce((a,p)=>a+(+p.valor||0),0);return Math.min(base,(sum||(!ps.length&&s?.status==='recebido'?base:0)));}
+function showParcelasRecebidas(s){return showParcelas(s).filter(p=>p.status==='recebida'||!p.status);}
+function showRecebido(s){const base=showLiquido(s),ps=showParcelasRecebidas(s),sum=ps.reduce((a,p)=>a+(+p.valor||0),0);return Math.min(base,(sum||(!showParcelas(s).length&&s?.status==='recebido'?base:0)));}
 function showSaldo(s){return Math.max(0,+(showLiquido(s)-showRecebido(s)).toFixed(2));}
 function showTemNota(s){return !!(s?.nfEmitida||s?.status==='nf'||s?.status==='recebido');}
 function showRecebStatus(s){const base=showLiquido(s),p=showRecebido(s);return p<=0?'Pendente':p>=base&&base>0?'Recebido':'Parcial';}
@@ -1339,6 +1355,9 @@ function showRecebidoNoMes(s,ms){
   // Compatibilidade com shows antigos sem parcelas detalhadas.
   if(!showParcelas(s).length&&s.status==='recebido'&&String(s.recData||s.data||'').startsWith(ms)) return showLiquido(s);
   return 0;
+}
+function showRecebidoNoPeriodo(s,ini,fim){
+  return showParcelasRecebidas(s).filter(p=>String(p.data||'')>=ini&&String(p.data||'')<=fim).reduce((a,p)=>a+(+p.valor||0),0);
 }
 function recebimentosShowsNoMes(ms){return arr(DB.shows).filter(s=>s.status!=='cancelado').reduce((a,s)=>a+showRecebidoNoMes(s,ms),0);}
 function saldoReceberShowsNoMes(ms){return arr(DB.shows).filter(s=>s.status!=='cancelado'&&String(s.recData||'').startsWith(ms)).reduce((a,s)=>a+showSaldo(s),0);}
@@ -1354,14 +1373,16 @@ let _syncTimer=null,_syncRetryTimer=null,_jbLoading=false,idxIdeia=0;
 
 /* ═══════ UTILS ════════════════════════════════════ */
 const fmt=v=>'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-const today=()=>new Date().toISOString().slice(0,10);
+const parseMoneyBR=v=>{const t=String(v??'').trim().replace(/R\$\s*/gi,'').replace(/\s/g,'');if(!t)return 0;const n=t.includes(',')?t.replace(/\./g,'').replace(',','.'):t;return Number(n)||0;};
+const dateKey=d=>{const x=d||new Date();return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;};
+const today=()=>dateKey();
 let _calMesRef=today().slice(0,7);
 let _calFiltroGrupo='';
 let _calFiltroLocal='';
 let _relFiltroGrupo='';
 let _relFiltroLocal='';
 const fmtD=s=>{try{return new Date(s+'T12:00').toLocaleDateString('pt-BR')}catch{return s||''}};
-const addDays=(s,n)=>{const d=new Date(s+'T12:00');d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
+const addDays=(s,n)=>{const d=new Date(s+'T12:00');d.setDate(d.getDate()+n);return dateKey(d)};
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const arr=o=>o?Object.values(o):[];
 const $=id=>document.getElementById(id);
@@ -1380,6 +1401,7 @@ function toast(msg,type='ok'){
 /* ═══════ SYNC ══════════════════════════════════ */
 function syncUI(ok,msg){
   const dot=$('sdot'),lbl=$('slbl'),txt=$('stxt');
+  LU.lastStatus=ok?'ok':'error'; LU.lastMessage=String(msg||'');
   if(dot)dot.style.background=ok?'var(--teal)':'var(--amber)';
   if(lbl)lbl.textContent=msg;
   if(txt)txt.textContent=ok?'online':'local';
@@ -1474,21 +1496,29 @@ function jbBin(){ return localStorage.getItem('luah_jb_bin')||''; }
 // cloudVer : versão da nuvem no último sync bem-sucedido (qualquer direção)
 let LU = { cloudVer: 0 };
 try{ const st = JSON.parse(localStorage.getItem(LU_STATE_KEY)||'{}'); LU.cloudVer = st.cloudVer||0; }catch(e){}
-function persistLU(){ try{ localStorage.setItem(LU_STATE_KEY, JSON.stringify({cloudVer: LU.cloudVer})); }catch(e){} }
+function persistLU(){ try{ localStorage.setItem(LU_STATE_KEY, JSON.stringify({cloudVer: LU.cloudVer,lastError:LU.lastError||'',lastStatus:LU.lastStatus||'',lastMessage:LU.lastMessage||''})); }catch(e){ console.warn('estado de sync não pôde ser salvo',e); } }
 
 function loadLocal(){
   try{
     const s = localStorage.getItem(STORAGE_KEY);
     if(s){
       const parsed = JSON.parse(s);
+      if(!parsed || typeof parsed!=='object') throw new Error('estado local inválido');
       DB = {shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{}, ...parsed};
     }
   }catch(e){
     console.warn('loadLocal erro:',e);
-    DB = {shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},meta:{},nfMensal:{}};
+    LU.lastError='Dados locais corrompidos ou indisponíveis';
+    try{ localStorage.setItem('luah-producao-dados-corrompidos',localStorage.getItem(STORAGE_KEY)||''); }catch(_e){}
+    DB = {shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{}};
+    toast('Dados locais inválidos. Use um backup para recuperar.','err');
   }
 }
-function saveLocal(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(DB)); }catch(e){} backupLocal(); }
+function saveLocal(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(DB)); }
+  catch(e){ LU.lastError='Armazenamento local cheio ou bloqueado'; syncUI(false,'armazenamento local indisponível'); toast('Não foi possível guardar localmente. Exporte um backup agora.','err'); return false; }
+  backupLocal(); return true;
+}
 function snapshotPublic(d){
   const out=JSON.parse(JSON.stringify(d||{}));
   delete out._queue; delete out._needsPush;
@@ -1515,7 +1545,7 @@ function mergeCloudKeepingLocalOnly(local,cloud){
 }
 
 /* ─── BACKUP LOCAL (v22) — várias versões automáticas ─── */
-const BK_KEY='luah-backups', BK_MAX=180;
+const BK_KEY='luah-backups', BK_MAX=365;
 function temDados(d){ d=d||DB; return Object.keys(d||{}).some(k=>!['_queue','_needsPush'].includes(k)&&d[k]&&typeof d[k]==='object'&&Object.keys(d[k]).length>0); }
 function listBackups(){ try{ return JSON.parse(localStorage.getItem(BK_KEY)||'[]'); }catch(e){ return []; } }
 function backupLocal(){
@@ -1526,12 +1556,13 @@ function backupLocal(){
     // Cada estado diferente gera uma nova cópia; estados idênticos não são duplicados.
     if(list[0]?.data===bk) return;
     const agora=Date.now(), d=new Date(agora);
-    list.unshift({dia:d.toISOString().slice(0,10),ts:agora,data:bk});
+    const dia=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    list.unshift({dia,ts:agora,data:bk});
     list=list.slice(0,BK_MAX);
     localStorage.setItem(BK_KEY,JSON.stringify(list));
   }catch(e){ console.warn('backupLocal erro:',e); }
 }
-function restoreFromBackup(ts){
+async function restoreFromBackup(ts){
   const list=listBackups();
   const b=list.find(x=>x.ts===ts);
   if(!b){ toast('Backup não encontrado','err'); return; }
@@ -1543,7 +1574,10 @@ function restoreFromBackup(ts){
     const parsed=JSON.parse(b.data);
     DB={shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},meta:{},nfMensal:{}, ...parsed};
     garantirArtista();
+    delete DB._queue; delete DB._needsPush;
     saveLocal();
+    // Publicar a restauração como uma nova operação, somente após a revisão local.
+    if(jbKey()&&jbBin()){ DB._queue=[{data:snapshotPublic(DB),id:'restore-'+Date.now()}]; saveLocal(); if(navigator.onLine) await drainQueue(jbKey(),jbBin()); }
     // se o backupLocal gravou o estado vazio no lugar do backup bom do dia, repor a cópia anterior
     const hoje2=new Date().toISOString().slice(0,10);
     const lst=listBackups();
@@ -1572,21 +1606,31 @@ async function save(){
 }
 async function drainQueue(key, bin){
   if(_saving) return;
+  if(!navigator.onLine){ syncUI(false,'offline — '+((DB._queue||[]).length)+' envio(s) pendente(s)'); return false; }
   _saving = true;
   try{
     while((DB._queue||[]).length){
       const op = DB._queue[0];
-      let ok = false;
+      let ok = false, lastErr='';
       for(let attempt = 0; attempt < 3; attempt++){
+        if(!navigator.onLine){ lastErr='offline'; break; }
         try{
+          const ctrl=new AbortController(), timer=setTimeout(()=>ctrl.abort(),12000);
           const r = await fetch(`${JB_BASE}/b/${bin}`,{
             method:'PUT',
             headers:{'Content-Type':'application/json','X-Master-Key':key,'X-Bin-Versioning':'false'},
-            body: JSON.stringify(op.data)
+            body: JSON.stringify(op.data), signal:ctrl.signal
           });
+          clearTimeout(timer);
           if(r.ok){ ok = true; break; }
-        }catch(e){}
-        await new Promise(rs=>setTimeout(rs, 1500*(attempt+1)));
+          const body=(await r.text()).slice(0,180);
+          lastErr=`HTTP ${r.status}${body?' — '+body:''}`;
+          if([401,403,404].includes(r.status)) break;
+          const retryAfter=Number(r.headers.get('Retry-After')||0);
+          await new Promise(rs=>setTimeout(rs,retryAfter>0?retryAfter*1000:1500*(attempt+1)));
+          continue;
+        }catch(e){ lastErr=e.name==='AbortError'?'timeout':(e.message||'rede'); }
+        await new Promise(rs=>setTimeout(rs,1500*(attempt+1)));
       }
       if(ok){
         DB._queue.shift();
@@ -1598,11 +1642,15 @@ async function drainQueue(key, bin){
         persistLU(); saveLocal();
         syncUI(true,'salvo '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
       }else{
-        syncUI(false,'erro ao salvar — a reenviar…');
-        break; // mantém na fila; retenta no próximo save ou no polling
+        LU.lastError=lastErr||'falha de envio'; persistLU();
+        const pend=(DB._queue||[]).length;
+        const label=lastErr==='offline'?'offline — pendente':lastErr.startsWith('HTTP 401')||lastErr.startsWith('HTTP 403')?'credencial sem permissão':lastErr.startsWith('HTTP 404')?'banco não encontrado':lastErr.startsWith('HTTP 429')?'limite de requisições':lastErr.startsWith('HTTP 5')?'servidor indisponível':lastErr==='timeout'?'tempo esgotado':'erro de rede';
+        syncUI(false,`${label} — ${pend} envio(s) pendente(s)`);
+        break; // mantém na fila; retenta no próximo tick ou ao voltar online
       }
     }
   }finally{ _saving = false; }
+  return !(DB._queue&&DB._queue.length);
 }
 function cleanQueue(){ if(DB._queue) delete DB._queue; }
 
@@ -1610,6 +1658,7 @@ function cleanQueue(){ if(DB._queue) delete DB._queue; }
 async function pullFromCloud(){
   const key = jbKey(), bin = jbBin();
   if(!key || !bin) return false;
+  if((DB._queue||[]).length){ syncUI(false,'há dados pendentes — enviando antes de atualizar'); return false; }
   LU.lastError='';
   try{
     const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:{'X-Master-Key':key,'X-Bin-Meta-Only':'true'}});
@@ -1652,6 +1701,9 @@ async function atualizarApp(){
   const btn = $('btn-refresh');
   if(btn){btn.style.transform='rotate(720deg)';setTimeout(()=>{btn.style.transition='none';btn.style.transform='';setTimeout(()=>btn.style.transition='transform .5s',50);},500);}
   syncUI(false,'sincronizando…');
+  if(!navigator.onLine){ loadLocal(); render(); syncUI(false,'offline — dados locais protegidos'); toast('Você está offline. Os dados continuam salvos neste aparelho.','err'); return; }
+  if((DB._queue||[]).length) await drainQueue(jbKey(),jbBin());
+  if((DB._queue||[]).length){ toast('Ainda há dados pendentes. Não vou substituir seus dados locais.','err'); return; }
   const pushed = await pullFromCloud();
   if(pushed==='protegido'){ toast('Dados locais protegidos — o banco na nuvem está vazio. Seus dados não foram apagados. Revisando…'); }
   else if(pushed){ toast(pushed==='vazio' && (Object.keys(DB.shows||{}).length||Object.keys(DB.fin||{}).length) ? 'A enviar dados deste aparelho…' : 'Dados atualizados!'); }
@@ -1676,6 +1728,8 @@ async function carregarJBInterno(){
   if(!Object.keys(DB.shows||{}).length && !Object.keys(DB.fin||{}).length){ loadLocal(); }
   // 1. Reenviar pendências locais (garante que exclusões recentes vão para a nuvem)
   await drainQueue(key, bin);
+  // Nunca fazer pull/merge enquanto existir uma intenção local não confirmada.
+  if((DB._queue||[]).length){ loadLocal(); garantirArtista(); render(); agendarReconexao(); return; }
   // 2. Trazer da nuvem apenas se não estiver desatualizada
   const pulled = await pullFromCloud();
   if(!pulled){ loadLocal(); garantirArtista(); syncUI(false,`JSONBin indisponível (${LU.lastError||'sem resposta'}) — dados locais`); render(); agendarReconexao(); return; }
@@ -1695,6 +1749,7 @@ async function carregarJBInterno(){
   _syncTimer = setInterval(async()=>{
     const key = jbKey(), bin = jbBin(); if(!key || !bin) return;
     await drainQueue(key, bin); // reenviar pendências primeiro
+    if((DB._queue||[]).length||!navigator.onLine) return;
     try{
       const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:{'X-Master-Key':key,'X-Bin-Meta-Only':'true'}});
       if(!rm.ok){ syncUI(false,`JSONBin indisponível (HTTP ${rm.status}) — tentando reconectar`); agendarReconexao(); return; }
@@ -1788,9 +1843,11 @@ async function conectarJSONBin(){
     toast((newBin ? 'Banco criado e conectado!' : 'Conectado ao banco existente!')+' Bin: '+binMostrado);
     await carregarJB(); // puxar os dados da nuvem (dos outros aparelhos)
     render();
-    // Polling automático
+    // O polling é mantido somente por carregarJB(); evita dois timers concorrentes.
     clearInterval(_syncTimer);
-    _syncTimer = setInterval(async()=>{
+    _syncTimer = null;
+    /* polling centralizado em carregarJB */
+    /*
       const key = jbKey(), bin = jbBin(); if(!key || !bin) return;
       await drainQueue(key, bin);
       try{
@@ -1817,6 +1874,7 @@ async function conectarJSONBin(){
         syncUI(true,'sync '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
       }catch(e){}
     }, 20000);
+    */
   }catch(e){
     err.textContent='Erro de conexão. Verifique sua internet.';
     err.style.display='block';
@@ -1969,6 +2027,9 @@ window.addEventListener('pagehide',()=>{try{saveLocal();backupLocal();}catch(e){
 const SUBS=['sa','ss','sna','sns','el','ea','ep','ec','fm','fd','fs','fcar','fx','na','ne'];
 let curTab='dash';
 
+function irNovoShow(){go('shows');setTimeout(()=>sub('sna'),0)}
+function irFinancas(){go('fin');setTimeout(()=>sub('fm'),0)}
+function irEquipe(){go('equipe');setTimeout(()=>sub('el'),0)}
 function go(id,btn){
   closeMore();
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));
@@ -2351,7 +2412,7 @@ function abrirEditSerie(id){
   document.querySelectorAll('#mferias input').forEach(c=>{c.checked=(r.ferias||[]).includes(+c.value);});
   // escala temporária com a equipa da série
   _escalaTemp.r={};_escalaValTemp.r={};_escalaManualTemp.r={};
-  (r.escalacao||[]).forEach(x=>{if(DB.equipe[x.mbId]){_escalaTemp.r[x.mbId]=true;_escalaValTemp.r[x.mbId]=+(x.val||0);_escalaManualTemp.r[x.mbId]=true;}});
+  (r.escalacao||[]).forEach(x=>{if(DB.equipe[x.mbId]){_escalaTemp.r[x.mbId]=true;_escalaValTemp.r[x.mbId]=+(x.val||0);_escalaManualTemp.r[x.mbId]=!!x.manual;}});
   if(typeof renderEscala==='function')renderEscala('r');
   const bt=$('btn-serie');if(bt){bt.textContent='Salvar alteração';bt.onclick=salvarSerie;}
   $('cv-serie').style.display='inline-flex';
@@ -2373,6 +2434,16 @@ function limparFormSerie(){editSerieId=null;$('rn').value='';$('rl').value='';$(
   const bt=$('btn-serie');if(bt){bt.textContent='Criar série recorrente';bt.onclick=addSerie;}
   const cv=$('cv-serie');if(cv)cv.style.display='none';
 }
+function aplicarEscalacaoSerieAosShows(sid){
+  const serie=DB.series[sid]; if(!serie)return;
+  const hoje=today();
+  Object.values(DB.shows||{}).forEach(sh=>{
+    if(sh.serieId===sid&&sh.data>=hoje&&sh.status!=='cancelado'){
+      sh.escalacao=(serie.escalacao||[]).map(x=>({...x}));
+      sh.valor=serie.valor; sh.liq=serie.liq; sh.imp=serie.imp; sh.prazo=serie.prazo; sh.termo=serie.termo; sh.recData=serie.termo==='vista'||serie.termo==='50-50'||serie.termo==='permuta'?sh.data:addDays(sh.data,+(serie.prazo||30));
+    }
+  });
+}
 async function salvarSerie(){
   const id=editSerieId;if(!id||!DB.series[id]){toast('Série não encontrada','err');return;}
   const nome=$('rn').value.trim(),inicio=$('ri').value;
@@ -2390,6 +2461,7 @@ async function salvarSerie(){
   r.prazo=+$('rp').value||30;r.inicio=inicio;r.fim=$('rf').value||'';
   if($('rtp'))r.tipo=$('rtp').value;r.ferias=ferias;r.escalacao=escalacao;
   gerarSerie(id);
+  aplicarEscalacaoSerieAosShows(id);
   editSerieId=null;_escalaTemp['r']={};
   limparFormSerie();
   await save();render();
@@ -2462,6 +2534,7 @@ function cancelarEditarMembro(){limparFormMembro();toast('Edição cancelada');}
 function propagarMembroEditado(id,dadosNovos){
   const t=today();
   Object.values(DB.shows||{}).forEach(sh=>{
+    if(sh.data<t||sh.status==='recebido'||sh.status==='cancelado') return;
     if((sh.escalacao||[]).some(x=>x.mbId===id)){
       sh.escalacao.forEach(x=>{ if(x.mbId===id){ x.fn=dadosNovos.fn; x.nome=dadosNovos.nome; if(!x.manual)x.val=dadosNovos.val; }});
     }
@@ -2495,7 +2568,7 @@ async function addMembro(){
 async function delMembro(id){if(!confirm('Remover?'))return;delete DB.equipe[id];if(editMembroId===id)limparFormMembro();await save();render();toast('Membro removido');}
 async function addPag(){
   const mbId=$('pmb').value,val=+$('pv').value||0;
-  if(!mbId||!val){toast('Selecione membro e valor','err');return;}
+  if(!mbId||!(val>0)){toast('Selecione membro e informe um valor maior que zero','err');return;}
   const mb=DB.equipe[mbId]||{};
   const showRef=$('pshow')?.value||'';
   const showNome=showRef&&DB.shows[showRef]?DB.shows[showRef].nome:'';
@@ -2767,7 +2840,7 @@ async function confirmarFinTXT(){
     for(const p of ps){divObj.pago=+(Math.min((divObj.pago||0)+p.valor,divObj.total)).toFixed(2);}
     nDiv=ps.length;
   }
-  for(const p of ps){const id=uid();const {secao,divId,...rest}=p;DB.fin[id]={id,...rest,tipo:secao||'desp'};}
+  for(const p of ps){const id=uid();const {secao,divId,...rest}=p;DB.fin[id]={id,...rest,tipo:p.tipo||secao||'desp'};}
   window._finTxtPend=null;$('ft-txt').value='';
    await save();render();$('ft-prev').innerHTML='';
   toast(nDiv?`${n} lançamento(s) salvo(s) — dívida "${ps[0].divId}" atualizada!`:`${n} lançamento(s) salvo(s)!`);
@@ -3027,14 +3100,14 @@ function toggleGrafCar(){
 function processarMsg(){
   const txt=$('msgtxt').value.trim(),def=$('mtp').value,data=$('mdt').value||today();
   if(!txt){toast('Digite ao menos um débito','err');return;}
-  const linhas=txt.split(/[\n,;—–]+/).map(l=>l.trim()).filter(l=>l.length>2);
+  const linhas=txt.split(/[\n;—–]+/).map(l=>l.trim()).filter(l=>l.length>2);
   const itens=[];
   linhas.forEach(linha=>{
     const{pgto,parc,limpo}=detectPgto(linha);
     const limpado=limpo.replace(/[-–—]/g,'').trim();
     const m=limpado.match(/(\d[\d\.]*(?:,\d{1,2})?)\s*$/);
     if(!m)return;
-    const v=parseFloat(m[1].replace(',','.'))||0;if(!v)return;
+    const v=parseMoneyBR(m[1]);if(!(v>0)){toast('Valor inválido: '+m[1],'err');return;}
     let nome=limpado.replace(/\d[\d\.,]*\s*$/,'').replace(/R?\$\s*/,'').trim();
     if(!nome)return;
     
@@ -3258,7 +3331,7 @@ function renderRel(){
   const tBruto=showsP.reduce((a,b)=>a+(b.valor||0),0);
   const tImp=showsP.reduce((a,b)=>a+(b.imp||0),0);
   const tLiq=showsP.reduce((a,b)=>a+(b.liq||0),0);
-  const tCaixaShows=arr(DB.shows).filter(s=>s.status!=='cancelado'&&filtroShowRel(s)).reduce((a,s)=>a+showRecebidoNoMes(s,iS.slice(0,7)),0);
+  const tCaixaShows=arr(DB.shows).filter(s=>s.status!=='cancelado'&&filtroShowRel(s)).reduce((a,s)=>a+showRecebidoNoPeriodo(s,iS,fS),0);
   const tRec=finP.filter(f=>f.tipo==='rec').reduce((a,b)=>a+b.valor,0);
   const tDesp=finP.filter(f=>f.tipo==='desp').reduce((a,b)=>a+b.valor,0);
   const tCasa=finP.filter(f=>f.tipo==='casa').reduce((a,b)=>a+b.valor,0);
@@ -3644,7 +3717,7 @@ function abrirEditShow(id){
   $('es-prazo-bloco').style.display=(['30','60','90'].includes($('es-termo').value))?'block':'none';
   // Carregar escalacao existente no seletor temporário de edição
   _escalaTemp['es']={};autoEscala('es');
-  escList(sh).forEach(x=>{ if(x.mbId && DB.equipe[x.mbId]){ _escalaTemp.es[x.mbId]=true; _escalaValTemp.es[x.mbId]=+(x.val||0); _escalaManualTemp.es[x.mbId]=true; } });
+  escList(sh).forEach(x=>{ if(x.mbId && DB.equipe[x.mbId]){ _escalaTemp.es[x.mbId]=true; _escalaValTemp.es[x.mbId]=+(x.val||0); _escalaManualTemp.es[x.mbId]=!!x.manual; } });
   renderEscala('es');
   _recebTemp.es=showParcelas(sh).map(p=>({...p}));
   if(!_recebTemp.es.length&&sh.status==='recebido')_recebTemp.es=[{valor:showLiquido(sh),data:today(),status:'recebida',obs:'Recebimento anterior'}];
@@ -3873,10 +3946,10 @@ async function emitirNfDoShow(id){
   toast('NF emitida para "'+x.nome+'". Recebimento em '+fmtD(x.recData));
   render();
 }
-function setNfPrev(id,v){
+async function setNfPrev(id,v){
   const x=DB.shows[id];if(!x)return;
   if(v)x.nfPrev=v;else delete x.nfPrev;
-  saveLocal();
+  await save(); render();
 }
 // Marcar show (NF emitida) como recebido (v19)
 async function marcarShowRecebido(id){
@@ -4282,6 +4355,8 @@ async function emitirNfMensal(serieId, mesRef, dtEmissao, dtPrazoFinanceiro, des
   const calc = calcNfMes(serieId, mesRef);
   if(!calc.qtShows){ toast('Nenhum show desta série neste mês','err'); return; }
   if(!DB.nfMensal) DB.nfMensal = {};
+  const individuais=arr(DB.nfMensal).filter(n=>n.serieId===serieId&&n.mesRef===mesRef&&n.tipo==='show');
+  if(individuais.length&&!confirm('Já existem '+individuais.length+' NF(s) individual(is) neste mês. Emitir a NF mensal também pode duplicar o faturamento. Continuar?')) return;
   DB.nfMensal[key] = {
     id: key, serieId, mesRef,
     dtEmissao,
@@ -4290,7 +4365,7 @@ async function emitirNfMensal(serieId, mesRef, dtEmissao, dtPrazoFinanceiro, des
     valor: calc.valor,
     liq: calc.liq,
     qtShows: calc.qtShows,
-    tipo: 'serie',
+    tipo: 'serie', status:'emitida',
     desc: (desc||'').trim()
   };
    await save(); toast('NF da série emitida! Pagamento previsto em '+fmtD(addDays(dtPrazoFinanceiro,30))); render();
@@ -4305,6 +4380,8 @@ async function emitirNfShow(serieId, mesRef, showId, dtEmissao, dtPrazoFinanceir
   if(!s){ toast('Show não encontrado','err'); return; }
   const key = nfShowKey(serieId, mesRef, showId);
   if(!DB.nfMensal) DB.nfMensal = {};
+  const mensal=nfKey(serieId,mesRef);
+  if(DB.nfMensal[mensal]&&DB.nfMensal[mensal].status!=='cancelada'&&!confirm('Já existe uma NF mensal desta série neste mês. Emitir uma NF individual também pode duplicar o faturamento. Continuar?')) return;
   DB.nfMensal[key] = {
     id: key, serieId, mesRef, showId,
     dtEmissao,
@@ -4314,7 +4391,7 @@ async function emitirNfShow(serieId, mesRef, showId, dtEmissao, dtPrazoFinanceir
     liq: s.liq||0,
     qtShows: 1,
     nomeShow: s.nome,
-    tipo: 'show',
+    tipo: 'show', status:'emitida',
     desc: (desc||'').trim()
   };
    await save(); toast('NF individual emitida para "'+s.nome+'"'); render();
@@ -4943,7 +5020,7 @@ function toggleMore(){
   document.getElementById('btn-more').classList.toggle('on',m.style.display==='block');
 }
 function closeMore(){document.getElementById('more-menu').style.display='none';document.getElementById('btn-more').classList.remove('on');}
-function goFromMore(viewId){closeMore();if(viewId==='conexao'){mostrarConexao();return;}go(viewId);}
+function goFromMore(viewId){closeMore();if(viewId==='conexao'){mostrarConexao();return;}const b=[...document.querySelectorAll('.bnav-btn')].find(x=>(x.getAttribute('onclick')||'').includes("'"+viewId+"'"));go(viewId,b);}
 function syncAgora(){atualizarApp();}
 function mostrarConexao(){
   const key=jbKey(), bin=jbBin();
