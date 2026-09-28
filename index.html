@@ -1153,7 +1153,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
   <div style="background:var(--s2);border:1px solid var(--line2);border-top-left-radius:20px;border-top-right-radius:20px;padding:22px 18px 36px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800">Detalhes do show</div><button onclick="fecharDetalheShow()" style="background:var(--s3);border:1px solid var(--line2);border-radius:50%;width:30px;height:30px;color:var(--t2);font-size:16px;cursor:pointer;font-family:Inter">×</button></div>
     <div id="detalhe-show-conteudo"></div>
-    <div style="display:flex;gap:8px;margin-top:14px"><button class="btn pri" style="flex:1" onclick="editarShowDetalhe()">Editar show</button><button class="btn ghost" style="flex:1" onclick="fecharDetalheShow()">Fechar</button></div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn pri" style="flex:1;min-width:130px" onclick="editarShowDetalhe()">Editar show</button><button class="btn" style="flex:1;min-width:130px;background:rgba(200,180,120,.1);color:var(--gold2);border:1px solid rgba(200,180,120,.3)" onclick="duplicarShowDetalhe()">Duplicar show</button><button class="btn ghost" style="flex:1;min-width:90px" onclick="fecharDetalheShow()">Fechar</button></div>
   </div>
 </div>
 
@@ -4041,6 +4041,23 @@ function abrirDetalheShow(id){
 }
 function fecharDetalheShow(){$('modal-show-detalhe').style.display='none';_detalheShowId=null;}
 function editarShowDetalhe(){const id=_detalheShowId;fecharDetalheShow();if(id!=null)abrirEditShow(id);}
+async function duplicarShowDetalhe(){
+  const id=_detalheShowId, sh=DB.shows[id]; if(!sh)return;
+  const d=new Date((sh.data||today())+'T12:00'); d.setDate(d.getDate()+7);
+  const sugestao=d.toLocaleDateString('pt-BR');
+  const entrada=prompt('Nova data para a cópia do show (DD/MM/AAAA):',sugestao);
+  if(entrada===null)return;
+  const novaData=dataTextoShow(entrada);
+  if(!novaData){toast('Data inválida. Use DD/MM/AAAA','err');return;}
+  const novo=JSON.parse(JSON.stringify(sh));
+  novo.id=uid(); novo.data=novaData; novo.status='agendado'; novo.nfEmitida=false; novo.recebimentos=[];
+  novo.recData=['vista','50-50','permuta'].includes(novo.termo)?novaData:addDays(novaData,+novo.prazo||30);
+  novo.falta=novo.valor?[]:['valor'];
+  delete novo.parcelas;
+  DB.shows[novo.id]=novo;
+  guardarLocal(novo.local||'');
+  await save(); fecharDetalheShow(); render(); toast('Show duplicado para '+fmtD(novo.data));
+}
 
 function showItem(sh){
   const past=sh.data<today();
