@@ -3898,7 +3898,16 @@ function renderNotas(){rNotasPend();rNotasEmit();}
 function escList(sh){
   const e=sh&&sh.escalacao;
   if(!e) return [];
-  if(Array.isArray(e)) return e;
+  const normalizar=x=>{
+    const membro=DB.equipe&&DB.equipe[x.mbId];
+    const valor=Number(x.val);
+    // Shows lançados por texto/versões antigas podem ter val=0 apesar de o membro ter valor padrão.
+    if((!Number.isFinite(valor)||valor===0)&&x.manual===false&&membro&&(membro.val||membro.perc)){
+      return {...x,val:valorPadraoMembro(membro,sh.valor||0),nome:membro.nome||x.nome,fn:membro.fn||x.fn};
+    }
+    return {...x,val:Number.isFinite(valor)?valor:0};
+  };
+  if(Array.isArray(e)) return e.map(normalizar);
   if(typeof e==='object') return Object.keys(e).map(k=>{const v=e[k];return {mbId:k,nome:v.nome||v.m||k,val:+(v.val||0),fn:v.fn||''};});
   return [];
 }
@@ -4234,7 +4243,7 @@ function confirmarSalvarShowTexto(){
 async function salvarShowTexto(){
   const nome=$('txts-nome').value.trim(),data=$('txts-data').value||today(); if(!nome){toast('Informe o nome do show','err');return;}
   const valor=+$('txts-valor').value||0, ids=[...document.querySelectorAll('.txts-mb:checked')].map(x=>x.value);
-  const escalacao=ids.filter(id=>DB.equipe[id]).map(id=>{const m=DB.equipe[id];return {mbId:id,nome:m.nome,fn:m.fn,val:0,manual:false};});
+  const escalacao=ids.filter(id=>DB.equipe[id]).map(id=>{const m=DB.equipe[id];return {mbId:id,nome:m.nome,fn:m.fn,val:valorPadraoMembro(m,valor),manual:false};});
   const horas=Math.max(0,+$('txts-horas').value||0), minutos=Math.min(59,Math.max(0,+$('txts-minutos').value||0));
   const duracaoTexto=$('txts-duracao').value.trim()||`${horas}h${String(minutos).padStart(2,'0')}`;
   const obs=[$('txts-formato').value.trim(),$('txts-passagem').value?`Passagem de som: ${$('txts-passagem').value}`:'',duracaoTexto?`Duração: ${duracaoTexto}`:'',$('txts-obs').value.trim()].filter(Boolean).join(' · ');
