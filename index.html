@@ -155,6 +155,11 @@ body{
 }
 .sl::after{content:'';flex:1;height:1px;background:var(--line)}
 .sl:first-child{margin-top:0}
+.connection-card{display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:12px;background:var(--s2);border:1px solid var(--line2);border-radius:10px;transition:border-color .2s,background .2s}
+.connection-card .conn-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 4px rgba(200,180,120,.08)}
+.connection-card .conn-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px}
+.connection-card .conn-detail{font-size:10px;color:var(--t3);margin-top:2px;line-height:1.35}
+.connection-card .conn-action{margin-left:auto;border:1px solid var(--line2);border-radius:7px;background:transparent;color:var(--gold2);padding:6px 8px;font:700 10px Inter;cursor:pointer;white-space:nowrap}
 
 /* ─── KPI CARDS ──────────────────────────────────── */
 .kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
@@ -549,6 +554,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
 <!-- INÍCIO -->
 <div id="v-dash" class="view on">
   <div id="avisos"></div>
+  <div id="d-connection-status" class="connection-card"></div>
   <!-- HERO -->
   <div class="dash-hero" id="d-hero">
     <div class="dash-hero-label">Saldo de <span id="d-mes"></span></div>
@@ -1373,9 +1379,19 @@ function toast(msg,type='ok'){
 
 /* ═══════ SYNC ══════════════════════════════════ */
 function syncUI(ok,msg){
-  $('sdot').style.background=ok?'var(--teal)':'var(--amber)';
-  $('slbl').textContent=msg;
-  $('stxt').textContent=ok?'online':'local';
+  const dot=$('sdot'),lbl=$('slbl'),txt=$('stxt');
+  if(dot)dot.style.background=ok?'var(--teal)':'var(--amber)';
+  if(lbl)lbl.textContent=msg;
+  if(txt)txt.textContent=ok?'online':'local';
+  const card=$('d-connection-status'); if(!card)return;
+  const m=String(msg||'');
+  const isJson=m.toLowerCase().includes('jsonbin');
+  const isOffline=/offline|off-line|sem jsonbin|modo local|dados locais|local/.test(m.toLowerCase());
+  const title=ok?'Conectado à nuvem':isJson?'JSONBin indisponível':isOffline?'Modo local':'Sincronização pendente';
+  const color=ok?'var(--teal)':isJson?'var(--rose)':'var(--amber)';
+  const detail=ok?`Última verificação: ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`:`${escH(m)} · os dados locais continuam protegidos`;
+  card.style.borderColor=color+'66'; card.style.background=ok?'rgba(70,180,155,.06)':'rgba(200,180,120,.06)';
+  card.innerHTML=`<span class="conn-dot" style="background:${color};box-shadow:0 0 0 4px ${color}22"></span><div style="min-width:0;flex:1"><div class="conn-title" style="color:${color}">${title}</div><div class="conn-detail">${detail}</div></div>${!ok?'<button class="conn-action" onclick="atualizarApp()">Tentar agora</button>':''}`;
 }
 
 /* ═══════════════════════════════════════════════════
