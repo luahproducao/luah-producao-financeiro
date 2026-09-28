@@ -863,6 +863,11 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
       <div id="f-filtros" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
         <div class="r2">
           <div class="fg"><label>Mês</label><input type="month" id="f-filtro-mes" onchange="renderFinList()"></div>
+          <div class="fg"><label>Responsável</label>
+            <select id="f-filtro-responsavel" onchange="renderFinList()"><option value="">Todos</option><option value="empresa">Empresa</option><option value="laila">Laila</option><option value="bruno">Bruno</option></select>
+          </div>
+        </div>
+        <div class="r2">
           <div class="fg"><label>Categoria</label>
             <select id="f-filtro-cat" onchange="renderFinList()">
               <option value="">Todas</option>
@@ -895,6 +900,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
         <div class="fg"><label>Tipo de imagem</label><select id="img-fin-tipo" onchange="toggleImgNotaModo()"><option value="extrato">Extrato bancário</option><option value="nota">Nota fiscal</option></select></div>
         <div class="fg" id="img-nota-modo-g" style="display:none"><label>Leitura da nota</label><select id="img-nota-modo"><option value="total">Valor total</option><option value="itens">Itens da nota</option></select></div>
       </div>
+      <div class="fg"><label>Responsável / pessoa</label><select id="img-responsavel"><option value="empresa">Empresa</option><option value="laila">Laila</option><option value="bruno">Bruno</option></select></div>
       <input type="file" id="img-fin-file" accept="image/*" style="display:none" onchange="lerFinImagem(this)">
       <button class="btn ghost" onclick="$('img-fin-file').click()">Escolher print ou foto</button>
       <div id="img-fin-status" style="font-size:11px;color:var(--t3);margin-top:8px"></div>
@@ -926,8 +932,11 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
         <div class="fg"><label>Valor (R$)</label><input id="fv" type="number" placeholder="0,00" inputmode="decimal"></div>
       </div>
       <div class="r2">
-        <div class="fg"><label>Descrição</label><input id="fdesc" placeholder="ex: Salário fixo"></div>
+        <div class="fg"><label>Descrição</label><input id="fdesc" placeholder="ex: Faculdade da Laila"></div>
         <div class="fg"><label>Data</label><input id="fdt" type="date"></div>
+      </div>
+      <div class="fg"><label>Responsável / pessoa</label>
+        <select id="fresponsavel"><option value="empresa">Empresa</option><option value="laila">Laila</option><option value="bruno">Bruno</option></select>
       </div>
       <div class="fg" id="fcg"><label>Categoria empresa</label>
         <select id="fc"><option>Gasolina</option><option>Manutenção do carro</option><option>Cartão de crédito</option><option>App distribuição</option><option>Equipamentos</option><option>Imposto Simples</option><option>Pagamento equipe</option><option>Pró-labore</option><option>Saúde (Empresa)</option><option>Outro</option></select>
@@ -2669,6 +2678,19 @@ const FINTX_BANCOS=[
 ];
 const FINTX_STOP=new Set(['c6','nu','de','do','da','das','dos','dum','duma','com','por','para','pra','na','no','nas','nos','em','a','o','os','as','um','uma','e','que','não','nao','todo','toda','todos','todas','hoje']);
 function fintxLimparNome(n){return n.replace(/[\s,;.-]+/g,' ').split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).filter(w=>w&&!FINTX_STOP.has(w.toLowerCase())).join(' ').trim()||'Lançamento';}
+function normalizarResponsavel(v){
+  const t=String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  if(t.includes('laila')) return 'laila';
+  if(t.includes('bruno')) return 'bruno';
+  return 'empresa';
+}
+function rotuloResponsavel(v){return ({empresa:'Empresa',laila:'Laila',bruno:'Bruno'})[normalizarResponsavel(v)]||'Empresa';}
+function detectarResponsavel(txt){
+  const t=String(txt||'').toLowerCase();
+  if(/\blaila\b|faculdade\s+(?:da\s+)?laila|cart[aã]o\s+(?:da\s+)?laila/.test(t)) return 'laila';
+  if(/\bbruno\b|faculdade\s+(?:do\s+)?bruno|cart[aã]o\s+(?:do\s+)?bruno/.test(t)) return 'bruno';
+  return 'empresa';
+}
 function parseFinTXT(t0,opts={}){
   const t=t0.trim().toLowerCase();
   let tipo='desp';
@@ -2739,7 +2761,7 @@ function parseFinTXT(t0,opts={}){
   if(banco&&!nome.toLowerCase().startsWith(banco.toLowerCase()))desc=`${banco} — ${nome}`;
   if(comprador)desc+=` · comprado por ${comprador}`;
   if(loja)desc+=` · loja ${loja}`;
-  return{tipo,valor,desc,nome,pgto,parc,banco,comprador,loja,dia,mesInicio,secao,div,valido:valor>0};
+  return{tipo,valor,desc,nome,pgto,parc,banco,comprador,loja,dia,mesInicio,secao,div,responsavel:detectarResponsavel(t0),valido:valor>0};
 }
 function gerarParcelasFin(txt,opts={}){
   const p=parseFinTXT(txt,opts);
@@ -2754,13 +2776,13 @@ function gerarParcelasFin(txt,opts={}){
   for(let i=0;i<n;i++){let m=mesBase+i,a=anoBase;if(m>11){m-=12;a++;}
     const data=`${a}-${String(m+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
     const cat = p.banco?'Cartão de crédito':inferCat(p.nome);
-    parcelas.push({tipo:p.tipo,valor:valorP,desc:n>1?`${p.desc} (${i+1}/${n})`:p.desc,data,cat,rec:p.tipo==='rec'?'receita':'variavel',pgto:p.pgto,parc:n>1?n:null,secao:p.secao||'desp',divId:p.div?p.div.nome:null});}
+    parcelas.push({tipo:p.tipo,valor:valorP,desc:n>1?`${p.desc} (${i+1}/${n})`:p.desc,data,cat,rec:p.tipo==='rec'?'receita':'variavel',pgto:p.pgto,parc:n>1?n:null,secao:p.secao||'desp',divId:p.div?p.div.nome:null,responsavel:p.responsavel||detectarResponsavel(txt)});}
     if(window._finTxtForcaPgto==='pix'||window._finTxtForcaPgto==='dinheiro'||window._finTxtForcaPgto==='debito'||window._finTxtForcaPgto==='credito-vista'){
     parcelas.forEach(p=>{p.pgto=window._finTxtForcaPgto;p.banco=null;if(window._finTxtForcaPgto!=='credito-vista')p.cat=p.secao==='casa'?'Alimentação':'Outro';});
   }
   if(window._finTxtForcaPgto==='credito-parcelado'){parcelas.forEach(p=>{p.pgto='credito-parcelado';p.cat='Cartão de crédito';p.banco=null;});}
 const _fp=window._finTxtForcaPgto;if(_fp==='credito-vista'){p.pgto='credito-vista';p.banco=null;}
-return{tipo:p.tipo,valor:p.valor,desc:p.desc,pgto:p.pgto,parc:n,banco:p.banco,dia,mesInicio:mesBase+1,anoInicio:anoBase,secao:p.secao,div:p.div,parcelas};
+return{tipo:p.tipo,valor:p.valor,desc:p.desc,pgto:p.pgto,parc:n,banco:p.banco,dia,mesInicio:mesBase+1,anoInicio:anoBase,secao:p.secao,div:p.div,responsavel:p.responsavel,parcelas};
 }
 function interpretarFinTXT(){
   const txt=$('ft-txt').value.trim();if(!txt){toast('Escreva o lançamento. Ex: "cartão c6 compra de computador de 5.800 parcelado em 12"','err');return;}
@@ -3125,7 +3147,7 @@ function processarMsg(){
       if(mb) mbId = mb.id;
     }
 
-    itens.push({nome,valor:v,rec:classRec(nome),cat:inferCat(nome),tipo:classSecao(nome,def),data,pgto:pgtoItem,parc,mbId,banco:bancoItem!=='Outros'?bancoItem:null});
+    itens.push({nome,valor:v,rec:classRec(nome),cat:inferCat(nome),tipo:classSecao(nome,def),data,pgto:pgtoItem,parc,mbId,banco:bancoItem!=='Outros'?bancoItem:null,responsavel:detectarResponsavel(nome)});
   });
   if(!itens.length){toast('Não identifiquei valores. Ex: "Gasolina 250"','err');return;}
   const fix=itens.filter(i=>i.rec==='fixo'),vari=itens.filter(i=>i.rec==='variavel');
@@ -3135,7 +3157,7 @@ function processarMsg(){
     <div style="margin-bottom:11px">
       <div style="font-size:10px;font-weight:700;color:${cor};text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;display:flex;justify-content:space-between">${icon} ${tit}<span>${fmt(lista.reduce((a,b)=>a+b.valor,0))}</span></div>
       ${lista.map(it=>`<div style="display:flex;align-items:center;justify-content:space-between;background:var(--s1);border:1px solid var(--line);border-radius:var(--rs);padding:8px 11px;margin-bottom:5px">
-        <div><div style="font-size:13px;font-weight:600">${escH(it.nome)}</div><div style="font-size:11px;color:var(--t3)">${escH(it.cat)} · ${it.tipo==='desp'?'Empresa':'Casa'}</div></div>
+        <div><div style="font-size:13px;font-weight:600">${escH(it.nome)}</div><div style="font-size:11px;color:var(--t3)">${escH(it.cat)} · ${it.tipo==='desp'?'Empresa':'Casa'} · <b style="color:var(--vio2)">${rotuloResponsavel(it.responsavel)}</b></div></div>
         <span style="font-size:13px;font-weight:700;color:var(--rose)">-${fmt(it.valor)}</span>
       </div>`).join('')}
     </div>`:''
@@ -3162,7 +3184,7 @@ async function confirmarMsg(){
   
   for(const it of itens){
     const id=uid();
-    DB.fin[id]={id,tipo:it.tipo,valor:it.valor,desc:it.nome,data:it.data,cat:it.cat,rec:it.rec,pgto:it.pgto||'',parc:it.parc||null,banco:it.banco};
+    DB.fin[id]={id,tipo:it.tipo,valor:it.valor,desc:it.nome,data:it.data,cat:it.cat,rec:it.rec,pgto:it.pgto||'',parc:it.parc||null,banco:it.banco,responsavel:normalizarResponsavel(it.responsavel||detectarResponsavel(it.nome))};
     
     // Se for pagamento de músico (v21)
     if(it.mbId){
@@ -3186,6 +3208,7 @@ function abrirEditFin(id){
   $('fv').value = f.valor;
   $('fdesc').value = f.desc;
   $('fdt').value = f.data;
+  $('fresponsavel').value = normalizarResponsavel(f.responsavel);
   if(f.tipo === 'casa'){
     $('fc2g').style.display = 'block'; $('fcg').style.display = 'none';
     $('fc2').value = f.cat;
@@ -3215,12 +3238,12 @@ async function addFin(){
       f.hist = f.hist || [];
       f.hist.push({dt: today(), v: f.valor});
     }
-    f.tipo = tipo; f.valor = val; f.desc = desc; f.data = dt; f.cat = cat; f.pgto = pgto; f.parc = parc;
+    f.tipo = tipo; f.valor = val; f.desc = desc; f.data = dt; f.cat = cat; f.pgto = pgto; f.parc = parc; f.responsavel = normalizarResponsavel($('fresponsavel').value);
     editFinId = null;
     toast('Lançamento atualizado');
   } else {
     const id=uid();
-    DB.fin[id]={id,tipo,valor:val,desc,data:dt,cat,pgto,parc,rec:classRec(desc)};
+    DB.fin[id]={id,tipo,valor:val,desc,data:dt,cat,pgto,parc,rec:classRec(desc),responsavel:normalizarResponsavel($('fresponsavel').value)};
     toast('Lançamento salvo');
   }
   await save(); render();
@@ -3336,6 +3359,9 @@ function renderRel(){
   const tDesp=finP.filter(f=>f.tipo==='desp').reduce((a,b)=>a+b.valor,0);
   const tCasa=finP.filter(f=>f.tipo==='casa').reduce((a,b)=>a+b.valor,0);
   const tPag=pagP.reduce((a,b)=>a+(b.val||0),0);
+  const porResponsavelRel={empresa:0,laila:0,bruno:0};
+  finP.filter(f=>f.tipo!=='rec').forEach(f=>{const k=normalizarResponsavel(f.responsavel||f.desc);porResponsavelRel[k]=(porResponsavelRel[k]||0)+(+f.valor||0);});
+  const responsaveisRelHtml=Object.entries(porResponsavelRel).map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px;color:var(--t2)"><span>${rotuloResponsavel(k)}</span><b style="color:var(--rose)">-${fmt(v)}</b></div>`).join('');
   const faturaPagP=arr(DB.faturaPagamentos).filter(p=>p.data>=iS&&p.data<=fS);
   const tFaturaPag=faturaPagP.reduce((a,b)=>a+(+b.valor||0),0);
   const divAbertas=arr(DB.div).filter(d=>(+d.total||0)-(+d.pago||0)>0);
@@ -3438,6 +3464,8 @@ function renderRel(){
       <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--t2)"><span>Outras receitas</span><b style="color:var(--teal)">+${fmt(tRec)}</b></div>
       <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--t2)"><span>Despesas empresa</span><b style="color:var(--rose)">-${fmt(tDesp)}</b></div>
       <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--t2)"><span>Despesas casa</span><b style="color:var(--rose)">-${fmt(tCasa)}</b></div>
+      <div class="sl" style="margin-top:12px">Despesas por responsável</div>
+      ${responsaveisRelHtml}
       <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--t2)"><span>Pagamentos equipe — quitados</span><b style="color:var(--rose)">-${fmt(tPag)}</b></div>
       <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--t2)"><span>Pagamentos de faturas — quitados</span><b style="color:var(--rose)">-${fmt(tFaturaPag)}</b></div>
       <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--t2)"><span>Dívidas pendentes</span><b style="color:var(--amber)">${fmt(tDiv)}</b></div>
@@ -4776,19 +4804,21 @@ async function confirmarFinImagem(){
   if(!rows.length){toast('Nenhum lançamento válido para gravar','err');return;}
   const novos=rows.filter(r=>!finImagemDuplicado(r));
   const repetidos=rows.length-novos.length;
-  novos.forEach(r=>{const id='finimg_'+uid();DB.fin[id]={id,tipo:'desp',valor:+r.valor.toFixed(2),desc:r.desc,data:r.data,cat:r.cat,pgto:'',parc:null,rec:classRec(r.desc),origemImagem:r.origem||'imagem'};});
+  novos.forEach(r=>{const id='finimg_'+uid();DB.fin[id]={id,tipo:'desp',valor:+r.valor.toFixed(2),desc:r.desc,data:r.data,cat:r.cat,pgto:'',parc:null,rec:classRec(r.desc),origemImagem:r.origem||'imagem',responsavel:normalizarResponsavel($('img-responsavel')?.value||'empresa')};});
   await save();_imgFinRows=[];renderImgFinPreview();if($('img-fin-status'))$('img-fin-status').textContent=`${novos.length} lançamento(s) gravado(s)${repetidos?`; ${repetidos} duplicado(s) ignorado(s)`:''}.`;render();toast(`${novos.length} lançamento(s) importado(s)`);
 }
 function rFin(){
   const e=$('lista-fin');if(!e)return;
   const fMes = $('f-filtro-mes')?.value;
   const fCat = $('f-filtro-cat')?.value;
+  const fResp = $('f-filtro-responsavel')?.value;
   
   let s=arr(DB.fin).sort((a,b)=>b.data.localeCompare(a.data));
   
   // Aplicar filtros
   if(fMes) s = s.filter(f => (f.data||'').startsWith(fMes));
   if(fCat) s = s.filter(f => f.cat === fCat || (fCat === 'Saúde' && (f.cat === 'Saúde (Empresa)' || f.cat === 'Saúde (Casa)')));
+  if(fResp) s = s.filter(f => normalizarResponsavel(f.responsavel || f.desc) === fResp);
 
   const previsao=`<div class="sl">Previsão dos próximos meses</div><div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px">${rPrevisao()}</div>`;
   if(!s.length){e.innerHTML=`<div class="empty">Nenhum lançamento encontrado com estes filtros.</div>`;return;}
@@ -4810,6 +4840,9 @@ function rFin(){
       Object.entries(porCat).sort((a,b)=>b[1]-a[1]).map(([c,v]) => `<span>${c}: <b>${fmt(v)}</b></span>`).join(' · ') + 
       `</div>`;
   }
+  const porResponsavel={empresa:0,laila:0,bruno:0};
+  s.forEach(f=>porResponsavel[normalizarResponsavel(f.responsavel||f.desc)]=(porResponsavel[normalizarResponsavel(f.responsavel||f.desc)]||0)+(+f.valor||0));
+  const respHtml=Object.entries(porResponsavel).filter(([,v])=>v>0).map(([k,v])=>`<span>${rotuloResponsavel(k)}: <b>${fmt(v)}</b></span>`).join(' · ');
   const tSaudeTotal = s.filter(f => f.cat === 'Saúde' || f.cat?.startsWith('Saúde')).reduce((a,b)=>a+b.valor,0);
   const tDivsTotal = s.filter(f => f.cat === 'Dívidas' || f.secao === 'casa').reduce((a,b)=>a+b.valor,0);
   
@@ -4833,6 +4866,7 @@ function rFin(){
       </div>
     </div>
     ${resumoCat}
+    ${respHtml?`<div style="font-size:11px;color:var(--t3);margin-top:8px"><b style="color:var(--vio2)">Por responsável:</b> ${respHtml}</div>`:''}
   `);
 
   const pgLabel={'pix':'Pix','dinheiro':' Dinheiro','debito':'Débito','credito-vista':'Crédito à vista','credito-parcelado':'Crédito parcelado'};
@@ -4858,6 +4892,7 @@ function rFin(){
             ${fmtD(f.data)}
             ${f.tipo==='casa'?`<span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;background:rgba(176,98,80,.1);color:var(--rose);border:1px solid rgba(176,98,80,.25)">Casa</span>`:''}
             ${f.cat?`<span style="color:var(--t3)">·</span><span>${f.cat}</span>`:''}
+            <span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;background:rgba(155,126,248,.10);color:var(--vio2);border:1px solid rgba(155,126,248,.25)">${rotuloResponsavel(f.responsavel||f.desc)}</span>
             ${pgtoStr?`<span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;background:${pgtoClr}14;color:${pgtoClr};border:1px solid ${pgtoClr}33">${pgtoStr}</span>`:''}
           </div>
         </div>
