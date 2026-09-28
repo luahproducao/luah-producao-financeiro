@@ -1498,26 +1498,22 @@ function mergeCloudKeepingLocalOnly(local,cloud){
   return {data:base,keptLocal};
 }
 
-/* ─── BACKUP LOCAL (v17) — versões diárias para nunca perder dados ─── */
-const BK_KEY='luah-backups';
-function temDados(d){ d=d||DB; return (Object.keys(d.shows||{}).length>0)||(Object.keys(d.fin||{}).length>0); }
+/* ─── BACKUP LOCAL (v22) — várias versões automáticas ─── */
+const BK_KEY='luah-backups', BK_MAX=180;
+function temDados(d){ d=d||DB; return Object.keys(d||{}).some(k=>!['_queue','_needsPush'].includes(k)&&d[k]&&typeof d[k]==='object'&&Object.keys(d[k]).length>0); }
 function listBackups(){ try{ return JSON.parse(localStorage.getItem(BK_KEY)||'[]'); }catch(e){ return []; } }
 function backupLocal(){
   try{
     if(!temDados()) return;
-    const hoje=new Date().toISOString().slice(0,10);
-    const bk=localStorage.getItem(STORAGE_KEY);
-    if(!bk) return;
+    const bk=localStorage.getItem(STORAGE_KEY); if(!bk) return;
     let list=listBackups();
-    // substituir/atualizar backup do dia (evita duplicar)
-    // nunca substituir um backup com dados por um estado vazio (proteção contra perda)
-    const atual=list.find(x=>x.dia===hoje);
-    if(atual && temDados(JSON.parse(atual.data)) && !temDados(JSON.parse(bk))){ return; }
-    list=list.filter(x=>x.dia!==hoje);
-    list.push({dia:hoje,ts:Date.now(),data:bk});
-    list=list.sort((a,b)=>b.ts-a.ts).slice(0,365);
+    // Cada estado diferente gera uma nova cópia; estados idênticos não são duplicados.
+    if(list[0]?.data===bk) return;
+    const agora=Date.now(), d=new Date(agora);
+    list.unshift({dia:d.toISOString().slice(0,10),ts:agora,data:bk});
+    list=list.slice(0,BK_MAX);
     localStorage.setItem(BK_KEY,JSON.stringify(list));
-  }catch(e){}
+  }catch(e){ console.warn('backupLocal erro:',e); }
 }
 function restoreFromBackup(ts){
   const list=listBackups();
@@ -1838,7 +1834,7 @@ function importarDados(inp){
 function renderBackupList(){
   const c = $('bk-list');
   const list = listBackups();
-  if(!list.length){ c.innerHTML='<div style="font-size:13px;color:var(--t2);padding:14px 4px">Ainda não há backups. Os backups são guardados automaticamente todos os dias em que houver dados.</div>'; return; }
+  if(!list.length){ c.innerHTML='<div style="font-size:13px;color:var(--t2);padding:14px 4px">Ainda não há backups. As cópias são guardadas automaticamente após alterações, a cada 5 minutos e ao sair do aplicativo.</div>'; return; }
   c.innerHTML = list.map(b => '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 12px;background:var(--s3);border:1px solid var(--line);border-radius:var(--rs);margin-bottom:8px"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">Backup de '+fmtD(b.dia)+'</div><div style="font-size:11px;color:var(--t2)">'+new Date(b.ts).toLocaleString('pt-BR')+'</div></div><button class="btn pri" style="font-size:12px;padding:8px 12px" onclick="restoreFromBackup('+b.ts+')">Restaurar</button></div>').join('');
 }
 
@@ -1934,7 +1930,11 @@ window.addEventListener('load',()=>{
   ['sd','fdt','mdt','pdt'].forEach(id=>{const e=$(id);if(e)e.value=today();});
   renderConteudo();
   setTimeout(initDiasSemana,700);
+  backupLocal();
+  clearInterval(window._luahBackupTimer);
+  window._luahBackupTimer=setInterval(backupLocal,5*60*1000);
 });
+window.addEventListener('pagehide',()=>{try{saveLocal();backupLocal();}catch(e){}});
 
 
 /* ═══════ NAV ═══════════════════════════════════ */
