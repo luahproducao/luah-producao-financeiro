@@ -982,6 +982,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
         <div class="fg"><label>Já paguei (R$)</label><input id="dvp" type="number" placeholder="0" value="0" inputmode="decimal"></div>
       </div>
       <div class="fg"><label>Vencimento (opcional)</label><input id="dvv" type="date"></div>
+      <div class="fg"><label>Link ou código para pagamento (opcional)</label><textarea id="dvpg" rows="2" placeholder="Cole o link, PIX copia e cola ou código do boleto"></textarea></div>
       <div class="fg"><label>Prioridade</label>
         <select id="dvpri"><option value="alta">Alta</option><option value="media">Média</option><option value="baixa">Baixa</option></select>
       </div>
@@ -1086,6 +1087,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
         </select>
       </div>
     </div>
+    <div class="fg"><label>Link ou código para pagamento</label><textarea id="ediv-pg" rows="3" placeholder="Link, PIX copia e cola ou código do boleto"></textarea></div>
     <div class="fg"><label>Observação</label>
       <input id="ediv-obs" placeholder="ex: Cartão fatura fechada dia 10">
     </div>
@@ -3287,8 +3289,8 @@ async function addDiv(){
   const nome=$('dvn').value.trim(),total=+$('dvt').value||0;
   if(!nome||!total){toast('Preencha nome e valor','err');return;}
   const id=uid();
-  DB.div[id]={id,nome,cat:$('dvcat').value,total,pago:+$('dvp').value||0,pri:$('dvpri').value,venc:$('dvv').value||''};
-  await save();['dvn','dvt','dvp'].forEach(i=>$(i).value='');toast('Dívida cadastrada');render();
+  DB.div[id]={id,nome,cat:$('dvcat').value,total,pago:+$('dvp').value||0,pri:$('dvpri').value,venc:$('dvv').value||'',pg:$('dvpg').value.trim()};
+  await save();['dvn','dvt','dvp','dvpg'].forEach(i=>$(i).value='');toast('Dívida cadastrada');render();
 }
 async function abaterDiv(id){
   const v=parseFloat($('ab-'+id).value)||0;if(!v)return;
@@ -3311,6 +3313,7 @@ function abrirEditDiv(id){
   $('ediv-total').value=d.total||0;
   $('ediv-pago').value=d.pago||0;
   $('ediv-pri').value=d.pri||'media';$('ediv-venc').value=d.venc||'';
+  $('ediv-pg').value=d.pg||'';
   $('ediv-obs').value=d.obs||'';
   const modal=$('div-modal');
   modal.style.display='flex';
@@ -3339,9 +3342,25 @@ async function salvarEditDiv(){
     pago,
     pri:$('ediv-pri').value,
     venc:$('ediv-venc').value||'',
+    pg:$('ediv-pg').value.trim(),
     obs:$('ediv-obs').value.trim()
   };
    await save();fecharEditDiv();toast('Dívida atualizada');render();
+}
+
+function textoPagamentoDivida(id){return (DB.div[id]?.pg||'').trim();}
+async function copiarPagamentoDivida(id){
+  const texto=textoPagamentoDivida(id);if(!texto){toast('Esta dívida não tem link ou código cadastrado','err');return;}
+  try{
+    if(navigator.clipboard)await navigator.clipboard.writeText(texto);
+    else{const ta=document.createElement('textarea');ta.value=texto;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();}
+    toast('Link/código de pagamento copiado');
+  }catch(e){toast('Não foi possível copiar o pagamento','err');}
+}
+function abrirPagamentoDivida(id){
+  const texto=textoPagamentoDivida(id);if(!texto){toast('Esta dívida não tem link cadastrado','err');return;}
+  if(/^https?:\/\//i.test(texto))window.open(texto,'_blank','noopener');
+  else copiarPagamentoDivida(id);
 }
 
 /* ═══════ EQUIPAMENTOS ══════════════════════════ */
@@ -5040,6 +5059,14 @@ function rDivs(){
           <span>${perc}% quitado</span>
           <span>Falta: <b style="color:var(--rose)">${fmt(rest)}</b></span>
         </div>
+        ${d.pg?`<div style="background:rgba(93,185,166,.08);border:1px solid rgba(93,185,166,.22);border-radius:10px;padding:10px;margin-bottom:10px">
+          <div style="font-size:10px;color:var(--teal);font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Pagamento salvo</div>
+          <div style="font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:8px" title="${escH(d.pg)}">${escH(d.pg)}</div>
+          <div style="display:flex;gap:7px">
+            <button onclick="copiarPagamentoDivida('${d.id}')" style="flex:1;background:rgba(93,185,166,.12);color:var(--teal);border:1px solid rgba(93,185,166,.28);border-radius:8px;padding:8px;font-size:11px;font-weight:700;cursor:pointer;font-family:Inter">Copiar código</button>
+            ${/^https?:\/\//i.test(d.pg)?`<button onclick="abrirPagamentoDivida('${d.id}')" style="flex:1;background:rgba(154,144,248,.10);color:var(--vio2);border:1px solid rgba(154,144,248,.25);border-radius:8px;padding:8px;font-size:11px;font-weight:700;cursor:pointer;font-family:Inter">Abrir link</button>`:''}
+          </div>
+        </div>`:''}
         <!-- Registrar pagamento inline -->
         <div style="background:var(--s3);border-radius:10px;padding:11px;display:flex;gap:7px;align-items:center">
           <input type="number" id="ab-${d.id}" placeholder="Valor a pagar agora (R$)" inputmode="decimal" style="flex:1;font-size:13px;padding:9px 11px;background:var(--s2)">
