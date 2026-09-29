@@ -1405,6 +1405,7 @@ let _calFiltroGrupo='';
 let _calFiltroLocal='';
 let _relFiltroGrupo='';
 let _relFiltroLocal='';
+let _mostrarDividasQuitadas=false;
 const fmtD=s=>{try{return new Date(s+'T12:00').toLocaleDateString('pt-BR')}catch{return s||''}};
 const addDays=(s,n)=>{const d=new Date(s+'T12:00');d.setDate(d.getDate()+n);return dateKey(d)};
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -5097,21 +5098,23 @@ function rDivs(){
   ['empresa','casa'].forEach(cat=>{
     const suf=cat==='empresa'?'emp':'cas';
     const e=$('ldiv-'+suf);if(!e)return;
-    const divs=arr(DB.div).filter(d=>d.cat===cat);
-    if(!divs.length){e.innerHTML=`<p class="empty">Nenhuma dívida ${cat==='empresa'?'de empresa':'pessoal/casa'}.</p>`;return;}
+    const todasDivs=arr(DB.div).filter(d=>d.cat===cat);
+    if(!todasDivs.length){e.innerHTML=`<p class="empty">Nenhuma dívida ${cat==='empresa'?'de empresa':'pessoal/casa'}.</p>`;return;}
+    const quitadas=todasDivs.filter(d=>(+d.total||0)-(+d.pago||0)<=0.005);
+    const divs=_mostrarDividasQuitadas?todasDivs:todasDivs.filter(d=>(+d.total||0)-(+d.pago||0)>0.005);
 
-    const total=divs.reduce((a,b)=>a+(b.total||0),0);
-    const pago=divs.reduce((a,b)=>a+(b.pago||0),0);
-    const aberto=total-pago;
+    const total=todasDivs.reduce((a,b)=>a+(+b.total||0),0);
+    const pago=todasDivs.reduce((a,b)=>a+(+b.pago||0),0);
+    const aberto=Math.max(0,total-pago);
 
-    const resumoCat=`<div style="background:rgba(176,98,80,.07);border:1px solid rgba(176,98,80,.18);border-radius:12px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+    const resumoCat=`<div style="background:rgba(176,98,80,.07);border:1px solid rgba(176,98,80,.18);border-radius:12px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px">
       <div>
-        <div style="font-size:10px;font-weight:700;color:var(--rose);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${divs.length} dívida${divs.length!==1?'s':''} em aberto</div>
+        <div style="font-size:10px;font-weight:700;color:var(--rose);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${todasDivs.filter(d=>(+d.total||0)-(+d.pago||0)>0.005).length} dívida${todasDivs.filter(d=>(+d.total||0)-(+d.pago||0)>0.005).length!==1?'s':''} em aberto</div>
         <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:800;color:var(--rose)">${fmt(aberto)}</div>
       </div>
-      <div style="text-align:right">
-        <div style="font-size:10px;color:var(--t3);margin-bottom:3px">Quitado</div>
-        <div style="font-size:16px;font-weight:700;color:var(--teal)">${fmt(pago)}</div>
+      <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:5px">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:3px">Quitado: ${fmt(pago)}</div>
+        ${quitadas.length?`<button onclick="alternarDividasQuitadas()" style="background:rgba(217,192,136,.10);color:var(--gold2);border:1px solid rgba(217,192,136,.28);border-radius:8px;padding:6px 8px;font-size:10px;font-weight:700;cursor:pointer;font-family:Inter">${_mostrarDividasQuitadas?'Ocultar quitadas':'Mostrar '+quitadas.length+' quitada'+(quitadas.length!==1?'s':'')}</button>`:''}
       </div>
     </div>`;
 
@@ -5169,9 +5172,10 @@ function rDivs(){
       </div>`;
     }).join('');
 
-    e.innerHTML=resumoCat+cards;
+    e.innerHTML=resumoCat+(divs.length?cards:`<div class="card" style="text-align:center;color:var(--teal);font-size:13px">Nenhuma dívida em aberto. As dívidas quitadas estão minimizadas.</div>`);
   });
 }
+function alternarDividasQuitadas(){_mostrarDividasQuitadas=!_mostrarDividasQuitadas;rDivs();}
 
 function rEquip(){
   const e=$('lista-equip');if(!e)return;
