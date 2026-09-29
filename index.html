@@ -1383,6 +1383,7 @@ function showRecebidoNoPeriodo(s,ini,fim){
 function recebimentosShowsNoMes(ms){return arr(DB.shows).filter(s=>s.status!=='cancelado').reduce((a,s)=>a+showRecebidoNoMes(s,ms),0);}
 function saldoReceberShowsNoMes(ms){return arr(DB.shows).filter(s=>s.status!=='cancelado'&&String(s.recData||'').startsWith(ms)).reduce((a,s)=>a+showSaldo(s),0);}
 const STORAGE_KEY='luah-producao-dados';
+const PENDING_KEY='luah-pending-sync';
 const SENHA_KEY='luah-producao-senha';
 const M=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const MS=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
@@ -1511,8 +1512,8 @@ function sair(){
 ═══════════════════════════════════════════════════ */
 const JB_BASE = 'https://api.jsonbin.io/v3';
 const LU_STATE_KEY = 'luah-sync-state';
-function jbKey(){ return (localStorage.getItem('luah_jb_key')||'').trim(); }
-function jbBin(){ return (localStorage.getItem('luah_jb_bin')||'').trim(); }
+function jbKey(){ return (localStorage.getItem('luah_jb_key')||'').trim().replace(/^['"]|['"]$/g,'').replace(/^(?:x-(?:master|access)-key|api\s*key)\s*:\s*/i,'').trim(); }
+function jbBin(){ return (localStorage.getItem('luah_jb_bin')||'').trim().replace(/^['"]|['"]$/g,''); }
 function jbAuthMode(){return localStorage.getItem('luah_jb_auth')||'master';}
 function jbHeaders(key,extra={}){const h={...extra};h[jbAuthMode()==='access'?'X-Access-Key':'X-Master-Key']=key;return h;}
 function jbSwitchAuth(){const next=jbAuthMode()==='access'?'master':'access';localStorage.setItem('luah_jb_auth',next);return next;}
@@ -1542,6 +1543,7 @@ function loadLocal(){
       if(!parsed || typeof parsed!=='object') throw new Error('estado local inválido');
       DB = {shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{}, ...parsed};
     }
+    try{const pend=JSON.parse(localStorage.getItem(PENDING_KEY)||'null');if(pend?.data)DB._queue=[pend];}catch(_e){}
   }catch(e){
     console.warn('loadLocal erro:',e);
     LU.lastError='Dados locais corrompidos ou indisponíveis';
@@ -1551,7 +1553,9 @@ function loadLocal(){
   }
 }
 function saveLocal(){
-  const estado=JSON.stringify(DB);
+  const fila=DB._queue?.length?DB._queue[DB._queue.length-1]:null;
+  const estadoObj={...DB};delete estadoObj._queue;delete estadoObj._needsPush;
+  const estado=JSON.stringify(estadoObj);
   try{ localStorage.setItem(STORAGE_KEY, estado); }
   catch(e){
     // Limpar cópias antigas antes de desistir. O estado atual sempre tem prioridade.
@@ -1559,6 +1563,7 @@ function saveLocal(){
     try{ localStorage.setItem(STORAGE_KEY, estado); }
     catch(_e){ LU.lastError='Armazenamento local cheio ou bloqueado'; syncUI(false,'armazenamento local indisponível'); toast('Armazenamento cheio. Cópias antigas foram removidas; exporte um backup.','err'); return false; }
   }
+  try{if(fila)localStorage.setItem(PENDING_KEY,JSON.stringify(fila));else localStorage.removeItem(PENDING_KEY);}catch(e){compactarBackups(true);try{if(fila)localStorage.setItem(PENDING_KEY,JSON.stringify(fila));else localStorage.removeItem(PENDING_KEY);}catch(_e){console.warn('fila pendente não pôde ser gravada',_e);}}
   backupLocal(); return true;
 }
 function snapshotPublic(d){
@@ -1634,7 +1639,7 @@ async function restoreFromBackup(ts){
     const lst=listBackups();
     const bd=lst.find(x=>x.dia===hoje2);
     if(anterior && temDados(JSON.parse(anterior)) && bd && !temDados(JSON.parse(bd.data))){
-      const restored=lst.filter(x=>x.ts!==bd.ts).concat({dia:hoje2,ts:bd.ts,data:anterior}).sort((a,c)=>c.ts-a.ts).slice(0,365);
+      const restored=lst.filter(x=>x.ts!==bd.ts).concat({dia:hoje2,ts:bd.ts,data:anterior}).sort((a,c)=>c.ts-a.ts).slice(0,BK_MAX);
       localStorage.setItem(BK_KEY,JSON.stringify(restored));
     }
     render();
@@ -1716,7 +1721,7 @@ async function drainQueue(key, bin){
   }finally{ _saving = false; }
   return !(DB._queue&&DB._queue.length);
 }
-function cleanQueue(){ if(DB._queue) delete DB._queue; }
+function cleanQueue(){ if(DB._queue) delete DB._queue; try{localStorage.removeItem(PENDING_KEY);}catch(e){} }
 
 // Traz os dados da nuvem APENAS se não estiverem desatualizados face ao último push local
 async function pullFromCloud(){
@@ -1845,8 +1850,8 @@ async function carregarJBInterno(){
 }
 
 async function conectarJSONBin(){
-  const key = $('jb-key-input').value.trim();
-  const binId = $('jb-bin-input') ? $('jb-bin-input').value.trim() : '';
+  const key = ($('jb-key-input').value||'').trim().replace(/^['"]|['"]$/g,'').replace(/^(?:x-(?:master|access)-key|api\s*key)\s*:\s*/i,'').trim();
+  const binId = $('jb-bin-input') ? ($('jb-bin-input').value||'').trim().replace(/^['"]|['"]$/g,'') : '';
   const btn = $('jb-connect-btn');
   const err = $('jb-err');
   if(!key){ err.textContent='Cole a API Key'; err.style.display='block'; return; }
@@ -5206,6 +5211,7 @@ function mostrarConexao(){
         API Key: <b style="color:var(--tx);font-family:'IBM Plex Mono',monospace;font-size:11px">${key.slice(0,8)}…</b>
       </div>
       <button onclick="copiarBin()" style="margin-top:10px;width:100%;background:rgba(200,180,120,.12);color:var(--gold2);border:1px solid rgba(200,180,120,.3);border-radius:8px;padding:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:Inter">Copiar Bin ID (para o outro aparelho)</button>
+      <button onclick="abrirSetupConexao();closeMore()" style="margin-top:7px;width:100%;background:rgba(176,98,80,.10);color:var(--rose);border:1px solid rgba(176,98,80,.28);border-radius:8px;padding:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:Inter">Corrigir ou trocar chave</button>
     </div>` :
     `<div class="card" style="border-color:var(--line)">
       <div style="font-size:12px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Sem sincronização</div>
