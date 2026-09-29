@@ -4566,7 +4566,12 @@ async function emitirNfShow(serieId, mesRef, showId, dtEmissao, dtPrazoFinanceir
 async function marcarNfRecebida(key){
   const nf=DB.nfMensal[key];
   if(!nf)return;
-  if(nf.status==='recebida'){toast('Esta NF já foi recebida e os músicos já foram calculados');return;}
+  if(nf.status==='recebida'){
+    const recuperados=gerarPagamentosEquipeDaNota(nf);
+    if(recuperados){await save();toast(recuperados+' pagamento(s) de músico(s) recuperado(s) para esta NF.');render();}
+    else toast('Esta NF já foi recebida e os pagamentos já estão calculados');
+    return;
+  }
   nf.status='recebida';
   const pagos=gerarPagamentosEquipeDaNota(nf);
   await save();
@@ -4657,7 +4662,7 @@ function rSeries(){
           <td style="padding:7px 6px;border-bottom:1px solid var(--line);font-size:12px;font-weight:700;text-align:right;white-space:nowrap">${fmt(sh.valor)}<br><span style="font-size:10px;color:var(--teal);font-weight:400">${fmt(sh.liq)} líq.</span></td>
           <td style="padding:7px 6px;border-bottom:1px solid var(--line);text-align:right">${
             nfInd
-              ? `${nfInd.status==='recebida'?`<span class="bdg g" style="font-size:9px">NF recebida</span>`:`<button class="btn sm g" style="font-size:10px;padding:4px 9px" onclick="marcarNfRecebida('${nfInd.id}')">Recebida</button>`}`
+              ? `${nfInd.status==='recebida'?`<button class="btn sm g" style="font-size:10px;padding:4px 9px" onclick="marcarNfRecebida('${nfInd.id}')">Recalcular músicos</button>`:`<button class="btn sm g" style="font-size:10px;padding:4px 9px" onclick="marcarNfRecebida('${nfInd.id}')">Recebida</button>`}`
               : podeEmitir
                 ? `<button class="btn sm on" style="font-size:10px;padding:4px 9px" onclick="abrirNfShow('${r.id}','${mes}','${sh.id}')">+ NF</button>`
                 : `<span style="font-size:10px;color:var(--t3)">futuro</span>`
@@ -4681,7 +4686,7 @@ function rSeries(){
             <div>Pagamento previsto<br><b style="font-size:13px;color:${nfSerie.status==='recebida'?'var(--teal)':'var(--gold)'}">${fmtD(nfPrazoPagamento(nfSerie))}</b></div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            ${nfSerie.status!=='recebida'?`<button class="btn sm g" onclick="marcarNfRecebida('${key}')">Marcar recebida</button>`:''}
+            ${nfSerie.status!=='recebida'?`<button class="btn sm g" onclick="marcarNfRecebida('${key}')">Marcar recebida</button>`:`<button class="btn sm g" onclick="marcarNfRecebida('${key}')">Recalcular músicos</button>`}
             <button class="btn sm del" onclick="delNfMensal('${key}')">Remover</button>
           </div>
         </div>`;
