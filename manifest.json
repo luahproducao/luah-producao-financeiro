@@ -1,12 +1,12 @@
 {
   "name": "Luah Produção",
   "short_name": "Luah",
-  "description": "Gestão financeira e de shows",
+  "description": "Gestão financeira e de shows em celular, iPad e notebook",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#050507",
   "theme_color": "#050507",
-  "orientation": "portrait",
+  "orientation": "any",
   "icons": [
     {
       "src": "icon-192.png",
