@@ -3365,8 +3365,12 @@ async function addDiv(){
   await save();['dvn','dvt','dvp','dvpg','dvprox'].forEach(i=>$(i).value='');$('dvrec').checked=false;$('dvrec-bloco').style.display='none';toast('Dívida cadastrada');render();
 }
 async function abaterDiv(id){
-  const v=parseFloat($('ab-'+id).value)||0;if(!v){toast('Informe o valor pago','err');return;}
   const d=DB.div[id]; if(!d)return;
+  const restante=Math.max(0,(+d.total||0)-(+d.pago||0));
+  if(!restante){toast('Esta dívida já está quitada');return;}
+  const campo=$('ab-'+id),digitado=String(campo?.value||'').trim();
+  const v=digitado?parseFloat(digitado):restante;
+  if(!v||v<0){toast('Informe um valor válido','err');return;}
   const pgto=$(('div-pgto-'+id))?.value||'pix';
   const dt=$(('div-data-'+id))?.value||today();
   d.pago=Math.min((+d.pago||0)+v,+d.total||v);
@@ -3728,7 +3732,7 @@ function renderSaude(){
         ${ns?`<span>${ns} shows p/ quitar</span>`:''}
       </div>
       <div style="display:flex;gap:7px;margin-top:10px">
-        <input type="number" id="qs-${d.id}" placeholder="Registrar pagamento (R$)" inputmode="decimal" style="flex:1;font-size:13px">
+        <input type="number" id="qs-${d.id}" placeholder="Em branco = quitar ${fmt(rest)}" inputmode="decimal" style="flex:1;font-size:13px">
         <button style="background:var(--teal);color:#0a0a0d;border:none;border-radius:var(--rs);padding:8px 13px;font-size:12px;font-weight:700;cursor:pointer" onclick="pagarDivSaude('${d.id}')"> Pagar</button>
       </div>
     </div>`;
@@ -3807,9 +3811,12 @@ function renderSaude(){
 }
 
 async function pagarDivSaude(id){
-  const v=parseFloat($('qs-'+id).value)||0;
-  if(!v){toast('Informe o valor a pagar','err');return;}
   const d=DB.div[id]; if(!d)return;
+  const restante=Math.max(0,(+d.total||0)-(+d.pago||0));
+  if(!restante){toast('Esta dívida já está quitada');return;}
+  const campo=$('qs-'+id),digitado=String(campo?.value||'').trim();
+  const v=digitado?parseFloat(digitado):restante;
+  if(!v||v<0){toast('Informe um valor válido','err');return;}
   const pgto=$(('div-pgto-'+id))?.value||'pix';
   d.pago=Math.min((+d.pago||0)+v,+d.total||v);
   d.pagamentos=d.pagamentos||[]; d.pagamentos.push({id:uid(),valor:+v.toFixed(2),data:today(),pgto,obs:'Pagamento de dívida'});
@@ -5147,7 +5154,7 @@ function rDivs(){
         <!-- Registrar pagamento inline -->
         <div style="background:var(--s3);border-radius:10px;padding:11px">
           <div style="display:grid;grid-template-columns:1.15fr .85fr;gap:7px;margin-bottom:7px">
-            <input type="number" id="ab-${d.id}" placeholder="Valor pago (R$)" inputmode="decimal" style="font-size:13px;padding:9px 11px;background:var(--s2)">
+            <input type="number" id="ab-${d.id}" placeholder="Em branco = quitar ${fmt(rest)}" inputmode="decimal" style="font-size:13px;padding:9px 11px;background:var(--s2)">
             <input type="date" id="div-data-${d.id}" value="${today()}" style="font-size:12px;padding:9px 8px;background:var(--s2)">
           </div>
           <div style="display:flex;gap:7px;align-items:center">
