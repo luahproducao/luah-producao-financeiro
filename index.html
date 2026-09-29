@@ -1550,8 +1550,14 @@ function loadLocal(){
   }
 }
 function saveLocal(){
-  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(DB)); }
-  catch(e){ LU.lastError='Armazenamento local cheio ou bloqueado'; syncUI(false,'armazenamento local indisponível'); toast('Não foi possível guardar localmente. Exporte um backup agora.','err'); return false; }
+  const estado=JSON.stringify(DB);
+  try{ localStorage.setItem(STORAGE_KEY, estado); }
+  catch(e){
+    // Limpar cópias antigas antes de desistir. O estado atual sempre tem prioridade.
+    compactarBackups(true);
+    try{ localStorage.setItem(STORAGE_KEY, estado); }
+    catch(_e){ LU.lastError='Armazenamento local cheio ou bloqueado'; syncUI(false,'armazenamento local indisponível'); toast('Armazenamento cheio. Cópias antigas foram removidas; exporte um backup.','err'); return false; }
+  }
   backupLocal(); return true;
 }
 function snapshotPublic(d){
@@ -1580,9 +1586,17 @@ function mergeCloudKeepingLocalOnly(local,cloud){
 }
 
 /* ─── BACKUP LOCAL (v22) — várias versões automáticas ─── */
-const BK_KEY='luah-backups', BK_MAX=365;
+const BK_KEY='luah-backups', BK_MAX=60, BK_MAX_BYTES=2500000;
 function temDados(d){ d=d||DB; return Object.keys(d||{}).some(k=>!['_queue','_needsPush'].includes(k)&&d[k]&&typeof d[k]==='object'&&Object.keys(d[k]).length>0); }
 function listBackups(){ try{ return JSON.parse(localStorage.getItem(BK_KEY)||'[]'); }catch(e){ return []; } }
+function compactarBackups(agressivo=false){
+  try{
+    let list=listBackups();
+    const limite=agressivo?12:BK_MAX;
+    while(list.length>limite||JSON.stringify(list).length>BK_MAX_BYTES)list.pop();
+    localStorage.setItem(BK_KEY,JSON.stringify(list));
+  }catch(e){try{localStorage.removeItem(BK_KEY);}catch(_e){}}
+}
 function backupLocal(){
   try{
     if(!temDados()) return;
@@ -1594,8 +1608,9 @@ function backupLocal(){
     const dia=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     list.unshift({dia,ts:agora,data:bk});
     list=list.slice(0,BK_MAX);
+    while(list.length>1&&JSON.stringify(list).length>BK_MAX_BYTES)list.pop();
     localStorage.setItem(BK_KEY,JSON.stringify(list));
-  }catch(e){ console.warn('backupLocal erro:',e); }
+  }catch(e){ compactarBackups(true); }
 }
 async function restoreFromBackup(ts){
   const list=listBackups();
@@ -1635,7 +1650,10 @@ async function save(){
   saveLocal();
   const key = jbKey(), bin = jbBin();
   if(!key || !bin){ syncUI(false,'local'); return; }
-  DB._queue = (DB._queue||[]).concat([{data: snapshotPublic(DB), id: Date.now()+'-'+Math.random().toString(36).slice(2,8)}]);
+  const novaOp={data: snapshotPublic(DB), id: Date.now()+'-'+Math.random().toString(36).slice(2,8)};
+  // O último estado completo já contém todas as alterações anteriores;
+  // guardar dezenas de snapshots só enche o armazenamento do celular.
+  DB._queue = _saving&&DB._queue?.length ? [DB._queue[0],novaOp] : [novaOp];
   DB._needsPush=false;
   saveLocal();
   if(!navigator.onLine){ syncUI(false,'off-line — '+(DB._queue||[]).length+' envio(s) na fila'); return; }
@@ -2062,6 +2080,7 @@ window.addEventListener('load',()=>{
   ['sd','fdt','mdt','pdt'].forEach(id=>{const e=$(id);if(e)e.value=today();});
   renderConteudo();
   setTimeout(initDiasSemana,700);
+  compactarBackups(false);
   backupLocal();
   clearInterval(window._luahBackupTimer);
   window._luahBackupTimer=setInterval(backupLocal,5*60*1000);
