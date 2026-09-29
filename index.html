@@ -784,6 +784,13 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
     <button class="itab"    onclick="sub('ec',this)"> Calcular</button>
   </div><div id="pan-eq" style="display:none;margin:10px 0"></div>
   <div id="el">
+    <div class="card" style="padding:11px 12px;margin-bottom:10px">
+      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+        <input id="eq-busca" oninput="rEq()" placeholder="Pesquisar membro ou função" style="flex:2;min-width:170px;font-size:12px;padding:9px;background:var(--s2);border:1px solid var(--line);border-radius:8px;color:var(--tx)">
+        <select id="eq-filtro" onchange="rEq()" style="flex:1;min-width:125px;font-size:12px;padding:8px;background:var(--s2);border:1px solid var(--line);border-radius:8px;color:var(--tx)"><option value="todos">Todos</option><option value="pendente">Com pendência</option><option value="quitado">Sem pendência</option></select>
+        <input id="eq-mes" type="month" onchange="rEq()" title="Filtrar previsão por mês" style="flex:1;min-width:125px;font-size:12px;padding:7px;background:var(--s2);border:1px solid var(--line);border-radius:8px;color:var(--tx)">
+      </div>
+    </div>
     <div id="lista-eq"></div>
   </div>
   <div id="ea" style="display:none">
@@ -832,6 +839,12 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
         <input id="pobs" placeholder="ex: Casamento Silva — 15/08">
       </div>
       <button class="btn pri" onclick="addPag()">Registrar pagamento</button>
+    </div>
+    <div class="card" style="padding:11px 12px;margin-top:10px">
+      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+        <select id="pag-filtro-mb" onchange="rPags()" style="flex:1;min-width:145px;font-size:12px;padding:8px;background:var(--s2);border:1px solid var(--line);border-radius:8px;color:var(--tx)"><option value="">Todos os membros</option></select>
+        <input id="pag-mes" type="month" onchange="rPags()" style="flex:1;min-width:125px;font-size:12px;padding:7px;background:var(--s2);border:1px solid var(--line);border-radius:8px;color:var(--tx)">
+      </div>
     </div>
     <div class="sl">Histórico</div>
     <div id="lista-pag"></div>
@@ -2677,6 +2690,24 @@ async function addPag(){
   const id=uid();
   DB.pags[id]={id,mbId,nome:mb.nome||'?',fn:mb.fn||'',val,dt:$('pdt').value||today(),ref:$('pref').value,showRef,showNome,obs:$('pobs')?.value.trim()||showNome};
   await save();$('pv').value='';if($('pobs'))$('pobs').value='';toast('Pagamento registrado');render();
+}
+function prepararPagamentoEquipe(mbId){
+  const m=DB.equipe[mbId];if(!m)return;
+  const saldo=Math.max(0,calcSaldoMembro(m));
+  go('equipe');setTimeout(()=>{
+    const tab=[...document.querySelectorAll('#v-equipe .itab')].find(x=>(x.getAttribute('onclick')||'').includes("sub('ep'"));
+    sub('ep',tab);
+    if($('pmb'))$('pmb').value=mbId;
+    if($('pv'))$('pv').value=saldo.toFixed(2);
+    if($('pobs'))$('pobs').value='Pagamento de saldo pendente — '+m.nome;
+    $('pv')?.focus();
+    toast('Pagamento preparado para '+m.nome);
+  },0);
+}
+async function excluirPagamento(id){
+  const p=DB.pags?.[id];if(!p)return;
+  if(!confirm('Excluir este pagamento de '+(p.nome||'membro')+' no valor de '+fmt(p.val)+'?'))return;
+  delete DB.pags[id];await save();render();toast('Pagamento excluído');
 }
 function calcNota(){
   const nota=+$('cnota').value||0;
@@ -4762,6 +4793,10 @@ async function abrirNfShow(serieId, mesRef, showId){
 }function rEq(){
   const e=$('lista-eq');if(!e)return;
   const eq=arr(DB.equipe);
+  const busca=($('eq-busca')?.value||'').trim().toLowerCase();
+  const filtro=$('eq-filtro')?.value||'todos';
+  const mesFiltro=$('eq-mes')?.value||today().slice(0,7);
+  if($('eq-mes')&&!$('eq-mes').value)$('eq-mes').value=mesFiltro;
   const tP=eq.reduce((a,m)=>a+(m.perc||0),0);
   const mesAtual=today().slice(0,7);
   const totalPrev=eq.reduce((a,m)=>a+calcDevidoMembro(m),0);
@@ -4794,7 +4829,12 @@ async function abrirNfShow(serieId, mesRef, showId){
     });
     return Object.entries(grp).map(([k,g])=>({...g,id:k}));
   };
-  e.innerHTML=info+(eq.length?eq.map(m=>{
+  const exibicao=eq.filter(m=>{
+    const texto=[m.nome,m.fn].filter(Boolean).join(' ').toLowerCase();
+    const pendMes=calcDevidoMembro(m,mesFiltro)-calcPagoMembro(m,mesFiltro);
+    return (!busca||texto.includes(busca))&&(filtro==='todos'||(filtro==='pendente'?pendMes>0:pendMes<=0));
+  }).sort((a,b)=>a.nome.localeCompare(b.nome));
+  e.innerHTML=info+(exibicao.length?exibicao.map(m=>{
     const ps=porShow(m.id);
     const totalMembro=ps.reduce((a,g)=>a+g.total,0);
     const devido=calcDevidoMembro(m);
@@ -4815,8 +4855,9 @@ async function abrirNfShow(serieId, mesRef, showId){
               <div style="background:var(--s3);border-radius:7px;padding:6px;text-align:center"><div style="font-size:8px;color:var(--t3);text-transform:uppercase">Já pago</div><b style="font-size:12px;color:var(--teal)">${fmt(pago)}</b></div>
               <div style="background:var(--s3);border-radius:7px;padding:6px;text-align:center"><div style="font-size:8px;color:var(--t3);text-transform:uppercase">Pendente</div><b style="font-size:12px;color:${saldo>0?'var(--rose)':'var(--teal)'}">${fmt(saldo)}</b></div>
             </div>
-            <div style="font-size:10px;color:var(--t3);margin-top:6px">Período atual: ${fmt(devidoMes)} previsto · ${fmt(pagoMesM)} pago · ${fmt(devidoMes-pagoMesM)} pendente</div>
+            <div style="font-size:10px;color:var(--t3);margin-top:6px">Período ${mesFiltro}: ${fmt(devidoMes)} previsto · ${fmt(pagoMesM)} pago · ${fmt(devidoMes-pagoMesM)} pendente</div>
             ${saldo > 0 ? `<div style="background:rgba(176,98,80,.08);padding:8px;border-radius:8px;font-size:11px;color:var(--rose);margin-top:9px;font-weight:700">⚠️ ${m.nome.split(' ')[0]} deve receber ${fmt(saldo)}.</div>` : ''}
+            ${saldo > 0 ? `<button class="btn sm g" style="margin-top:8px;width:100%" onclick="prepararPagamentoEquipe('${m.id}')">Registrar pagamento de ${fmt(saldo)}</button>` : ''}
             ${detalhesHtml}
           </div>
           ${ps.length?`
@@ -4839,20 +4880,24 @@ async function abrirNfShow(serieId, mesRef, showId){
         </div>
       </div>
     </div>`;
-  }).join(''):`<p class="empty">Nenhum membro cadastrado.</p>`);
+  }).join(''):`<p class="empty">${eq.length?'Nenhum membro corresponde aos filtros.':'Nenhum membro cadastrado.'}</p>`);
 }
 function rPags(){
   const e=$('lista-pag');if(!e)return;
-  const pg=arr(DB.pags).sort((a,b)=>b.dt.localeCompare(a.dt));
-  e.innerHTML=pg.length?pg.slice(0,30).map(p=>`<div class="item ir">
+  const fm=$('pag-filtro-mb');
+  if(fm){const atual=fm.value;fm.innerHTML='<option value="">Todos os membros</option>'+arr(DB.equipe).sort((a,b)=>a.nome.localeCompare(b.nome)).map(m=>`<option value="${m.id}">${m.nome}</option>`).join('');fm.value=atual;}
+  const mbFiltro=$('pag-filtro-mb')?.value||'',mesFiltro=$('pag-mes')?.value||'';
+  const pg=arr(DB.pags).filter(p=>(!mbFiltro||p.mbId===mbFiltro)&&(!mesFiltro||String(p.dt||'').startsWith(mesFiltro))).sort((a,b)=>String(b.dt||'').localeCompare(String(a.dt||'')));
+  const total=pg.reduce((a,p)=>a+(+p.val||0),0);
+  e.innerHTML=(pg.length?`<div class="card" style="padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;font-size:12px;color:var(--t2)"><span>${pg.length} pagamento(s) filtrado(s)</span><b style="color:var(--teal)">${fmt(total)}</b></div>`:'')+(pg.length?pg.slice(0,60).map(p=>`<div class="item ir">
     <div class="ih">
       <div style="flex:1">
         <div class="iname">${p.nome} <span class="bdg v" style="font-size:9px">${p.fn||''}</span></div>
         <div class="imeta">${fmtD(p.dt)} · ${p.ref}${p.obs&&p.obs!==p.fn?' · '+p.obs:''}</div>
       </div>
-      <span style="font-size:14px;font-weight:700;color:var(--rose)">-${fmt(p.val)}</span>
+      <div style="display:flex;align-items:center;gap:7px"><span style="font-size:14px;font-weight:700;color:var(--rose)">-${fmt(p.val)}</span><button class="btn sm del" title="Excluir pagamento" onclick="excluirPagamento('${p.id}')">×</button></div>
     </div>
-  </div>`).join(''):`<p class="empty">Nenhum pagamento registrado.</p>`;
+  </div>`).join(''):`<p class="empty">Nenhum pagamento corresponde aos filtros.</p>`);
 }
 function rPagSel(){
   const s=$('pmb');if(!s)return;
