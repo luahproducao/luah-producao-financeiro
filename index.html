@@ -1500,6 +1500,9 @@ const JB_BASE = 'https://api.jsonbin.io/v3';
 const LU_STATE_KEY = 'luah-sync-state';
 function jbKey(){ return localStorage.getItem('luah_jb_key')||''; }
 function jbBin(){ return localStorage.getItem('luah_jb_bin')||''; }
+function jbAuthMode(){return localStorage.getItem('luah_jb_auth')||'master';}
+function jbHeaders(key,extra={}){const h={...extra};h[jbAuthMode()==='access'?'X-Access-Key':'X-Master-Key']=key;return h;}
+function jbSwitchAuth(){const next=jbAuthMode()==='access'?'master':'access';localStorage.setItem('luah_jb_auth',next);return next;}
 
 // Estado de sincronização persistente:
 // cloudVer : versão da nuvem no último sync bem-sucedido (qualquer direção)
@@ -1627,14 +1630,15 @@ async function drainQueue(key, bin){
           const ctrl=new AbortController(), timer=setTimeout(()=>ctrl.abort(),12000);
           const r = await fetch(`${JB_BASE}/b/${bin}`,{
             method:'PUT',
-            headers:{'Content-Type':'application/json','X-Master-Key':key,'X-Bin-Versioning':'false'},
+            headers:jbHeaders(key,{'Content-Type':'application/json','X-Bin-Versioning':'false'}),
             body: JSON.stringify(op.data), signal:ctrl.signal
           });
           clearTimeout(timer);
           if(r.ok){ ok = true; break; }
           const body=(await r.text()).slice(0,180);
           lastErr=`HTTP ${r.status}${body?' — '+body:''}`;
-          if([401,403,404].includes(r.status)) break;
+          if([401,403].includes(r.status) && attempt===0 && jbAuthMode()==='master'){ jbSwitchAuth(); continue; }
+          if(r.status===404) break;
           const retryAfter=Number(r.headers.get('Retry-After')||0);
           await new Promise(rs=>setTimeout(rs,retryAfter>0?retryAfter*1000:1500*(attempt+1)));
           continue;
@@ -1645,7 +1649,7 @@ async function drainQueue(key, bin){
         DB._queue.shift();
         // Atualizar cloudVer com a versão real da nuvem
         try{
-          const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:{'X-Master-Key':key,'X-Bin-Meta-Only':'true'}});
+          const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:jbHeaders(key,{'X-Bin-Meta-Only':'true'})});
           if(rm.ok){ const jm = await rm.json(); const v = jm.metadata?.version||0; if(v) LU.cloudVer = v; }
         }catch(e){}
         persistLU(); saveLocal();
@@ -1670,12 +1674,12 @@ async function pullFromCloud(){
   if((DB._queue||[]).length){ syncUI(false,'há dados pendentes — enviando antes de atualizar'); return false; }
   LU.lastError='';
   try{
-    const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:{'X-Master-Key':key,'X-Bin-Meta-Only':'true'}});
+    const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:jbHeaders(key,{'X-Bin-Meta-Only':'true'})});
     if(!rm.ok){ LU.lastError='HTTP '+rm.status; return false; }
     const jm = await rm.json();
     const ver = jm.metadata?.version||0;
     if(ver < LU.cloudVer) return false; // nuvem mais antiga: não aceitar
-    const r = await fetch(`${JB_BASE}/b/${bin}/latest`,{headers:{'X-Master-Key':key}});
+    const r = await fetch(`${JB_BASE}/b/${bin}/latest`,{headers:jbHeaders(key)});
     if(!r.ok){
       // 404 = bin criado mas vazio — NUNCA substituir dados locais por estado vazio
       if(r.status === 404){
@@ -1760,7 +1764,7 @@ async function carregarJBInterno(){
     await drainQueue(key, bin); // reenviar pendências primeiro
     if((DB._queue||[]).length||!navigator.onLine) return;
     try{
-      const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:{'X-Master-Key':key,'X-Bin-Meta-Only':'true'}});
+      const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:jbHeaders(key,{'X-Bin-Meta-Only':'true'})});
       if(!rm.ok){ syncUI(false,`JSONBin indisponível (HTTP ${rm.status}) — tentando reconectar`); agendarReconexao(); return; }
       const jm = await rm.json();
       const ver = jm.metadata?.version||0;
@@ -1768,7 +1772,7 @@ async function carregarJBInterno(){
         syncUI(true,'sync '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
         return; // nada novo na nuvem
       }
-      const r = await fetch(`${JB_BASE}/b/${bin}/latest`,{headers:{'X-Master-Key':key}});
+      const r = await fetch(`${JB_BASE}/b/${bin}/latest`,{headers:jbHeaders(key)});
       if(!r.ok){ syncUI(false,`JSONBin indisponível (HTTP ${r.status}) — tentando reconectar`); agendarReconexao(); return; }
       const j = await r.json(); const d = j.record;
       if(!d || typeof d !== 'object') return;
@@ -1801,9 +1805,10 @@ async function conectarJSONBin(){
     let newBin = false;
     if(binId){
       // Verificar que o bin existe e é acessível com esta chave
-      const chk = await fetch(`${JB_BASE}/b/${binId}/latest`,{headers:{'X-Master-Key':key}});
+      let chk = await fetch(`${JB_BASE}/b/${binId}/latest`,{headers:jbHeaders(key)});
+      if(!chk.ok && [401,403].includes(chk.status) && jbAuthMode()==='master'){ jbSwitchAuth(); chk = await fetch(`${JB_BASE}/b/${binId}/latest`,{headers:jbHeaders(key)}); }
       if(!chk.ok){
-        err.textContent='Não foi possível aceder a esse banco. Verifique a chave e o ID.';
+        err.textContent='Não foi possível acessar este banco. A chave pode ser de outro tipo ou não ter permissão de leitura e escrita. O app tentou Core API Key e Access Key.';
         err.style.display='block';
         btn.textContent='Conectar e salvar dados'; btn.disabled=false;
         return;
@@ -1823,11 +1828,11 @@ async function conectarJSONBin(){
       if(!confirm('Vai criar um banco NOVO na nuvem e enviar os dados deste aparelho.\n\nSe você já tem dados em outro aparelho, CANCELE e cole o ID do banco de lá (em Mais → Conexão do outro aparelho).\n\nDeseja continuar?')){ btn.textContent='Conectar e salvar dados'; btn.disabled=false; return; }
       const r = await fetch(`${JB_BASE}/b`,{
         method:'POST',
-        headers:{'Content-Type':'application/json','X-Master-Key':key,'X-Bin-Name':'luah-producao','X-Bin-Private':'false'},
+        headers:jbHeaders(key,{'Content-Type':'application/json','X-Bin-Name':'luah-producao','X-Bin-Private':'false'}),
         body: JSON.stringify(DB)
       });
       if(!r.ok){
-        err.textContent='Chave inválida. Verifique e tente novamente.';
+        err.textContent='A chave foi recusada. Use uma Core API Key ou uma Access Key com permissões Read e Write.';
         err.style.display='block';
         btn.textContent='Conectar e salvar dados'; btn.disabled=false;
         return;
@@ -1839,6 +1844,7 @@ async function conectarJSONBin(){
       newBin = true;
     }
     localStorage.setItem('luah_jb_key', key);
+    if(!localStorage.getItem('luah_jb_auth')) localStorage.setItem('luah_jb_auth','master');
     if(!newBin){ loadLocal(); } // garantir que o DB local existe antes de decidir
     $('fb-setup-view').style.display='none';
     localStorage.setItem('luah_logado','1');
@@ -1860,7 +1866,7 @@ async function conectarJSONBin(){
       const key = jbKey(), bin = jbBin(); if(!key || !bin) return;
       await drainQueue(key, bin);
       try{
-        const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:{'X-Master-Key':key,'X-Bin-Meta-Only':'true'}});
+        const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:jbHeaders(key,{'X-Bin-Meta-Only':'true'})});
         if(!rm.ok) return;
         const jm = await rm.json();
         const ver = jm.metadata?.version||0;
@@ -1868,7 +1874,7 @@ async function conectarJSONBin(){
           syncUI(true,'sync '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
           return;
         }
-        const r2 = await fetch(`${JB_BASE}/b/${bin}/latest`,{headers:{'X-Master-Key':key}});
+        const r2 = await fetch(`${JB_BASE}/b/${bin}/latest`,{headers:jbHeaders(key)});
         if(!r2.ok) return;
         const j2 = await r2.json(); const d = j2.record;
         if(!d || typeof d !== 'object') return;
