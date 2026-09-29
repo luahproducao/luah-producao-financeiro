@@ -1197,7 +1197,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
   <div style="background:var(--s2);border:1px solid var(--line2);border-top-left-radius:20px;border-top-right-radius:20px;padding:22px 18px 36px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800">Detalhes do show</div><button onclick="fecharDetalheShow()" style="background:var(--s3);border:1px solid var(--line2);border-radius:50%;width:30px;height:30px;color:var(--t2);font-size:16px;cursor:pointer;font-family:Inter">×</button></div>
     <div id="detalhe-show-conteudo"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn pri" style="flex:1;min-width:130px" onclick="editarShowDetalhe()">Editar show</button><button class="btn" style="flex:1;min-width:130px;background:rgba(200,180,120,.1);color:var(--gold2);border:1px solid rgba(200,180,120,.3)" onclick="duplicarShowDetalhe()">Duplicar show</button><button class="btn ghost" style="flex:1;min-width:90px" onclick="fecharDetalheShow()">Fechar</button></div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn pri" style="flex:1;min-width:130px" onclick="editarShowDetalhe()">Editar show / série</button><button class="btn" style="flex:1;min-width:130px;background:rgba(200,180,120,.1);color:var(--gold2);border:1px solid rgba(200,180,120,.3)" onclick="duplicarShowDetalhe()">Duplicar show</button><button class="btn ghost" style="flex:1;min-width:90px" onclick="fecharDetalheShow()">Fechar</button></div>
   </div>
 </div>
 
@@ -2108,6 +2108,7 @@ window.addEventListener('pagehide',()=>{try{saveLocal();backupLocal();}catch(e){
 /* ═══════ NAV ═══════════════════════════════════ */
 const SUBS=['sa','ss','sna','sns','el','ea','ep','ec','fm','fd','fs','fcar','fx','na','ne'];
 let curTab='dash';
+const ROTAS_PRINCIPAIS=['dash','shows','equipe','fin','equip','notas','rel','dig'];
 
 function irNovoShow(){go('shows');setTimeout(()=>sub('sna'),0)}
 function irFinancas(){go('fin');setTimeout(()=>sub('fm'),0)}
@@ -2115,22 +2116,24 @@ function irEquipe(){go('equipe');setTimeout(()=>sub('el'),0)}
 function go(id,btn){
   closeMore();
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('on'));
+  const v=document.getElementById('v-'+id);
+  if(!v){toast('Página não encontrada: '+id,'err');return;}
   document.querySelectorAll('.bnav-btn').forEach(b=>b.classList.remove('on'));
-  const v=document.getElementById('v-'+id);if(v)v.classList.add('on');
-  if(btn) btn.classList.add('on');
+  v.classList.add('on');
+  const navBtn=btn||[...document.querySelectorAll('.bnav-btn')].find(b=>(b.getAttribute('onclick')||'').includes("'"+id+"'"));
+  if(navBtn)navBtn.classList.add('on');
   curTab=id;
   document.getElementById('qbar').style.display=id==='fin'?'flex':'none';
+  window.scrollTo({top:0,behavior:'smooth'});
   render();
 }
 function sub(id,btn){
   if(id==='fx')renderImpostos();
-  if(btn) {
-    btn.closest('.itabs').querySelectorAll('.itab').forEach(b=>b.classList.remove('on'));
-    btn.classList.add('on');
-  }
+  const target=$(id);if(!target){toast('Aba não encontrada: '+id,'err');return;}
+  const grupo=btn?.closest('.itabs')||target.closest('.view')?.querySelector('.itabs');
+  if(grupo){grupo.querySelectorAll('.itab').forEach(b=>b.classList.remove('on'));const ativo=btn||[...grupo.querySelectorAll('.itab')].find(b=>(b.getAttribute('onclick')||'').includes("'"+id+"'"));if(ativo)ativo.classList.add('on');}
   SUBS.forEach(s=>{const e=$(s);if(e)e.style.display='none';});
-  const target = $(id);
-  if(target) target.style.display='block';
+  target.style.display='block';
   // Inicializar escalação ao abrir formulários de show
   if(id==='sna'){garantirArtista();setTimeout(()=>{autoEscala('s');renderEscala('s');},50);}
   if(id==='sns'){garantirArtista();setTimeout(()=>{autoEscala('r');renderEscala('r');},50);}
@@ -4316,7 +4319,7 @@ function abrirDetalheShow(id){
   const m=$('modal-show-detalhe');m.style.display='flex';
 }
 function fecharDetalheShow(){$('modal-show-detalhe').style.display='none';_detalheShowId=null;}
-function editarShowDetalhe(){const id=_detalheShowId;fecharDetalheShow();if(id!=null)abrirEditShow(id);}
+function editarShowDetalhe(){const id=_detalheShowId,sh=id!=null?DB.shows[id]:null;fecharDetalheShow();if(!sh)return;sh.serieId?abrirEditSerie(sh.serieId):abrirEditShow(id);}
 async function duplicarShowDetalhe(){
   const id=_detalheShowId, sh=DB.shows[id]; if(!sh)return;
   const d=new Date((sh.data||today())+'T12:00'); d.setDate(d.getDate()+7);
@@ -4374,7 +4377,7 @@ function showItem(sh){
     ${escList(sh).length?`<div style="font-size:10px;color:var(--t3);margin-bottom:10px">Escalação: ${escList(sh).map(x=>x.nome).join(' · ')}</div>`:''}
     <!-- Ações compactas -->
     <div style="display:flex;gap:6px;flex-wrap:wrap">
-      <button onclick="abrirEditShow('${sh.id}')" style="flex:1;background:rgba(154,144,120,.05);color:var(--sky);border:1px solid rgba(154,144,120,.25);border-radius:8px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;font-family:Inter">Editar</button>
+      <button onclick="${sh.serieId?`abrirEditSerie('${sh.serieId}')`:`abrirEditShow('${sh.id}')`}" style="flex:1;background:rgba(154,144,120,.05);color:var(--sky);border:1px solid rgba(154,144,120,.25);border-radius:8px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;font-family:Inter">${sh.serieId?'Editar série':'Editar'}</button>
       <button onclick="waEquipe('${sh.id}')" style="flex:1;background:rgba(37,211,102,.1);color:#25d366;border:1px solid rgba(37,211,102,.25);border-radius:8px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;font-family:Inter">WhatsApp</button>
       ${sh.serie?`<button onclick="cancelarOc('${sh.id}')" style="flex:1;background:rgba(176,98,80,.05);color:var(--rose);border:1px solid rgba(176,98,80,.25);border-radius:8px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;font-family:Inter">Cancelar</button>`:''}
       <button onclick="delShow('${sh.id}')" style="background:rgba(176,98,80,.05);color:var(--rose);border:1px solid rgba(176,98,80,.28);border-radius:8px;padding:8px 12px;font-size:12px;cursor:pointer;font-family:Inter">&times;</button>
