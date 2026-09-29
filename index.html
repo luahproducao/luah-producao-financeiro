@@ -1503,6 +1503,17 @@ function jbBin(){ return localStorage.getItem('luah_jb_bin')||''; }
 function jbAuthMode(){return localStorage.getItem('luah_jb_auth')||'master';}
 function jbHeaders(key,extra={}){const h={...extra};h[jbAuthMode()==='access'?'X-Access-Key':'X-Master-Key']=key;return h;}
 function jbSwitchAuth(){const next=jbAuthMode()==='access'?'master':'access';localStorage.setItem('luah_jb_auth',next);return next;}
+async function jbFetchWithAuthFallback(url,key,options={}){
+  const inicial=jbAuthMode();
+  const modos=[inicial,inicial==='master'?'access':'master'];
+  let resposta=null;
+  for(const modo of modos){
+    localStorage.setItem('luah_jb_auth',modo);
+    resposta=await fetch(url,{...options,headers:jbHeaders(key,options.headers||{})});
+    if(resposta.ok||![401,403].includes(resposta.status))break;
+  }
+  return resposta;
+}
 
 // Estado de sincronização persistente:
 // cloudVer : versão da nuvem no último sync bem-sucedido (qualquer direção)
@@ -1607,14 +1618,23 @@ async function restoreFromBackup(ts){
 // Enfileira um PUT e processa a fila sequencialmente com retry
 let _saving = false;
 async function save(){
+  // Persistência local é síncrona e protegida contra perda; a rede nunca deve
+  // bloquear a resposta visual de um botão por vários segundos.
   saveLocal();
   const key = jbKey(), bin = jbBin();
   if(!key || !bin){ syncUI(false,'local'); return; }
   DB._queue = (DB._queue||[]).concat([{data: snapshotPublic(DB), id: Date.now()+'-'+Math.random().toString(36).slice(2,8)}]);
   DB._needsPush=false;
   saveLocal();
-  if(!navigator.onLine){ syncUI(false,'off-line — '+(DB._queue||[]).length+' envio(s) na fila'); }
-  await drainQueue(key, bin);
+  if(!navigator.onLine){ syncUI(false,'off-line — '+(DB._queue||[]).length+' envio(s) na fila'); return; }
+  syncUI(false,'salvando…');
+  // Não aguardar a rede: os handlers podem renderizar e retornar imediatamente.
+  // O worker sequencial continua processando a fila e atualiza o indicador depois.
+  drainQueue(key, bin).catch(e=>{
+    LU.lastError=e?.message||'falha de envio';
+    persistLU();
+    syncUI(false,'envio pendente — dados salvos neste aparelho');
+  });
 }
 async function drainQueue(key, bin){
   if(_saving) return;
@@ -1805,8 +1825,7 @@ async function conectarJSONBin(){
     let newBin = false;
     if(binId){
       // Verificar que o bin existe e é acessível com esta chave
-      let chk = await fetch(`${JB_BASE}/b/${binId}/latest`,{headers:jbHeaders(key)});
-      if(!chk.ok && [401,403].includes(chk.status) && jbAuthMode()==='master'){ jbSwitchAuth(); chk = await fetch(`${JB_BASE}/b/${binId}/latest`,{headers:jbHeaders(key)}); }
+      let chk = await jbFetchWithAuthFallback(`${JB_BASE}/b/${binId}/latest`,key);
       if(!chk.ok){
         err.textContent='Não foi possível acessar este banco. A chave pode ser de outro tipo ou não ter permissão de leitura e escrita. O app tentou Core API Key e Access Key.';
         err.style.display='block';
@@ -1826,9 +1845,9 @@ async function conectarJSONBin(){
     }else{
       // Criar um bin novo com os dados atuais (v17: confirmar antes de criar)
       if(!confirm('Vai criar um banco NOVO na nuvem e enviar os dados deste aparelho.\n\nSe você já tem dados em outro aparelho, CANCELE e cole o ID do banco de lá (em Mais → Conexão do outro aparelho).\n\nDeseja continuar?')){ btn.textContent='Conectar e salvar dados'; btn.disabled=false; return; }
-      const r = await fetch(`${JB_BASE}/b`,{
+      const r = await jbFetchWithAuthFallback(`${JB_BASE}/b`,key,{
         method:'POST',
-        headers:jbHeaders(key,{'Content-Type':'application/json','X-Bin-Name':'luah-producao','X-Bin-Private':'false'}),
+        headers:{'Content-Type':'application/json','X-Bin-Name':'luah-producao','X-Bin-Private':'false'},
         body: JSON.stringify(DB)
       });
       if(!r.ok){
@@ -2416,12 +2435,17 @@ function verificaDuplicacaoCartao(ps){
 function abrirEditSerie(id){
   const r=DB.series[id];if(!r)return;
   editSerieId=id;
+  // Garantir que o utilizador está no módulo de shows e na aba de séries.
+  // Sem isso, em alguns dispositivos o clique parecia abrir o fluxo de novo show.
+  if(typeof go==='function'&&(!document.getElementById('v-shows')?.classList.contains('on')))go('shows');
   // abrir a sub-tab da série (sns)
   const snsTab=[...document.querySelectorAll('#v-shows .itab')].find(t=>t.getAttribute('onclick').includes("sub('sns'"));
   if(typeof sub==='function'&&snsTab)sub('sns',snsTab);
   $('rn').value=r.nome||'';$('rl').value=r.local||'';$('rd').value=r.dia;$('rh').value=r.hora||'21:00';
   $('rv').value=r.valor||'';$('ri').value=r.inicio||'';$('rf').value=r.fim||'';
+  if($('stermo-serie'))$('stermo-serie').value=r.termo||String(r.prazo||30);
   if($('rp'))$('rp').value=r.prazo||30;
+  if($('rp-bloco'))$('rp-bloco').style.display=(['30','60','90'].includes(String(r.termo||r.prazo||30)))?'block':'none';
   if($('rtp'))$('rtp').value=r.tipo||'';
   // férias
   document.querySelectorAll('#mferias input').forEach(c=>{c.checked=(r.ferias||[]).includes(+c.value);});
@@ -2451,9 +2475,10 @@ function limparFormSerie(){editSerieId=null;$('rn').value='';$('rl').value='';$(
 }
 function aplicarEscalacaoSerieAosShows(sid){
   const serie=DB.series[sid]; if(!serie)return;
-  const hoje=today();
   Object.values(DB.shows||{}).forEach(sh=>{
-    if(sh.serieId===sid&&sh.data>=hoje&&sh.status!=='cancelado'){
+    // Aplicar a alteração em lote também aos shows já gerados da série;
+    // shows cancelados continuam preservados como histórico e não são reativados.
+    if(sh.serieId===sid&&sh.status!=='cancelado'){
       sh.escalacao=(serie.escalacao||[]).map(x=>({...x}));
       sh.valor=serie.valor; sh.liq=serie.liq; sh.imp=serie.imp; sh.prazo=serie.prazo; sh.termo=serie.termo; sh.recData=serie.termo==='vista'||serie.termo==='50-50'||serie.termo==='permuta'?sh.data:addDays(sh.data,+(serie.prazo||30));
     }
@@ -2473,7 +2498,9 @@ async function salvarSerie(){
   });
   r.nome=nome;r.local=$('rl').value.trim();r.dia=+$('rd').value;r.hora=$('rh').value||'21:00';
   r.valor=valor;r.liq=+(valor*(1-ImpostoConfig())).toFixed(2);r.imp=+(valor*ImpostoConfig()).toFixed(2);
-  r.prazo=+$('rp').value||30;r.inicio=inicio;r.fim=$('rf').value||'';
+  r.termo=$('stermo-serie')?.value||'30';
+  r.prazo=!isNaN(+r.termo)?+r.termo:(+$('rp').value||30);
+  r.inicio=inicio;r.fim=$('rf').value||'';
   if($('rtp'))r.tipo=$('rtp').value;r.ferias=ferias;r.escalacao=escalacao;
   gerarSerie(id);
   aplicarEscalacaoSerieAosShows(id);
