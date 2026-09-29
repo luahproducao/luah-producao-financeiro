@@ -887,7 +887,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
 
     <div class="card glass">
       <div style="font-size:15px;font-weight:700;margin-bottom:6px">+ Novo lançamento — por texto</div>
-      <div style="font-size:12px;color:var(--t2);margin-bottom:12px;line-height:1.6">Escreva como fala — o sistema entende valor, cartão, loja, quem comprou e parcelas:<br><em style="color:var(--vio2)">"cartão c6 compra de computador de 5.800 parcelado em 12"</em> · <em style="color:var(--vio2)">"pix recebido 3200 da turnê"</em> · <em style="color:var(--vio2)">"compras para casa mercado 350"</em></div>
+      <div style="font-size:12px;color:var(--t2);margin-bottom:12px;line-height:1.6">Escreva como fala — o sistema entende valor, pagamento, dívida, empréstimo, recorrência e parcelas. Sempre revise a prévia antes de salvar:<br><em style="color:var(--vio2)">"pagamento de 250 em pix que peguei emprestado para pagar seguro da moto e carro"</em> · <em style="color:var(--vio2)">"paguei 300 da dívida do aluguel"</em> · <em style="color:var(--vio2)">"seguro do carro 180 todo mês no pix"</em></div>
       <textarea id="ft-txt" rows="4" placeholder="Ex: cartão c6 compra de computador de 5.800 parcelado em 12"></textarea>
       <div class="sp"></div>
       <button class="btn pri" onclick="interpretarFinTXT()">Interpretar</button>
@@ -983,6 +983,11 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
       </div>
       <div class="fg"><label>Vencimento (opcional)</label><input id="dvv" type="date"></div>
       <div class="fg"><label>Link ou código para pagamento (opcional)</label><textarea id="dvpg" rows="2" placeholder="Cole o link, PIX copia e cola ou código do boleto"></textarea></div>
+      <div style="display:flex;align-items:center;gap:8px;margin:5px 0 9px"><input id="dvrec" type="checkbox" style="width:auto" onchange="$('dvrec-bloco').style.display=this.checked?'grid':'none'"><label for="dvrec" style="font-size:12px;color:var(--t2)">Dívida recorrente</label></div>
+      <div class="r2" id="dvrec-bloco" style="display:none">
+        <div class="fg"><label>Periodicidade</label><select id="dvfreq"><option value="mensal">Mensal</option><option value="semanal">Semanal</option><option value="anual">Anual</option></select></div>
+        <div class="fg"><label>Próximo vencimento</label><input id="dvprox" type="date"></div>
+      </div>
       <div class="fg"><label>Prioridade</label>
         <select id="dvpri"><option value="alta">Alta</option><option value="media">Média</option><option value="baixa">Baixa</option></select>
       </div>
@@ -1088,6 +1093,11 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
       </div>
     </div>
     <div class="fg"><label>Link ou código para pagamento</label><textarea id="ediv-pg" rows="3" placeholder="Link, PIX copia e cola ou código do boleto"></textarea></div>
+    <div style="display:flex;align-items:center;gap:8px;margin:5px 0 9px"><input id="ediv-rec" type="checkbox" style="width:auto" onchange="$('ediv-rec-bloco').style.display=this.checked?'grid':'none'"><label for="ediv-rec" style="font-size:12px;color:var(--t2)">Dívida recorrente</label></div>
+    <div class="r2" id="ediv-rec-bloco" style="display:none">
+      <div class="fg"><label>Periodicidade</label><select id="ediv-freq"><option value="mensal">Mensal</option><option value="semanal">Semanal</option><option value="anual">Anual</option></select></div>
+      <div class="fg"><label>Próximo vencimento</label><input id="ediv-prox" type="date"></div>
+    </div>
     <div class="fg"><label>Observação</label>
       <input id="ediv-obs" placeholder="ex: Cartão fatura fechada dia 10">
     </div>
@@ -1500,8 +1510,8 @@ function sair(){
 ═══════════════════════════════════════════════════ */
 const JB_BASE = 'https://api.jsonbin.io/v3';
 const LU_STATE_KEY = 'luah-sync-state';
-function jbKey(){ return localStorage.getItem('luah_jb_key')||''; }
-function jbBin(){ return localStorage.getItem('luah_jb_bin')||''; }
+function jbKey(){ return (localStorage.getItem('luah_jb_key')||'').trim(); }
+function jbBin(){ return (localStorage.getItem('luah_jb_bin')||'').trim(); }
 function jbAuthMode(){return localStorage.getItem('luah_jb_auth')||'master';}
 function jbHeaders(key,extra={}){const h={...extra};h[jbAuthMode()==='access'?'X-Access-Key':'X-Master-Key']=key;return h;}
 function jbSwitchAuth(){const next=jbAuthMode()==='access'?'master':'access';localStorage.setItem('luah_jb_auth',next);return next;}
@@ -1650,16 +1660,16 @@ async function drainQueue(key, bin){
         if(!navigator.onLine){ lastErr='offline'; break; }
         try{
           const ctrl=new AbortController(), timer=setTimeout(()=>ctrl.abort(),12000);
-          const r = await fetch(`${JB_BASE}/b/${bin}`,{
+          const r = await jbFetchWithAuthFallback(`${JB_BASE}/b/${bin}`,key,{
             method:'PUT',
-            headers:jbHeaders(key,{'Content-Type':'application/json','X-Bin-Versioning':'false'}),
+            headers:{'Content-Type':'application/json','X-Bin-Versioning':'false'},
             body: JSON.stringify(op.data), signal:ctrl.signal
           });
           clearTimeout(timer);
           if(r.ok){ ok = true; break; }
           const body=(await r.text()).slice(0,180);
           lastErr=`HTTP ${r.status}${body?' — '+body:''}`;
-          if([401,403].includes(r.status) && attempt===0 && jbAuthMode()==='master'){ jbSwitchAuth(); continue; }
+          if([401,403].includes(r.status) && attempt===0){ continue; }
           if(r.status===404) break;
           const retryAfter=Number(r.headers.get('Retry-After')||0);
           await new Promise(rs=>setTimeout(rs,retryAfter>0?retryAfter*1000:1500*(attempt+1)));
@@ -1671,7 +1681,7 @@ async function drainQueue(key, bin){
         DB._queue.shift();
         // Atualizar cloudVer com a versão real da nuvem
         try{
-          const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:jbHeaders(key,{'X-Bin-Meta-Only':'true'})});
+          const rm = await jbFetchWithAuthFallback(`${JB_BASE}/b/${bin}?meta=true`,key,{headers:{'X-Bin-Meta-Only':'true'}});
           if(rm.ok){ const jm = await rm.json(); const v = jm.metadata?.version||0; if(v) LU.cloudVer = v; }
         }catch(e){}
         persistLU(); saveLocal();
@@ -1679,7 +1689,7 @@ async function drainQueue(key, bin){
       }else{
         LU.lastError=lastErr||'falha de envio'; persistLU();
         const pend=(DB._queue||[]).length;
-        const label=lastErr==='offline'?'offline — pendente':lastErr.startsWith('HTTP 401')||lastErr.startsWith('HTTP 403')?'credencial sem permissão':lastErr.startsWith('HTTP 404')?'banco não encontrado':lastErr.startsWith('HTTP 429')?'limite de requisições':lastErr.startsWith('HTTP 5')?'servidor indisponível':lastErr==='timeout'?'tempo esgotado':'erro de rede';
+        const label=lastErr==='offline'?'offline — pendente':lastErr.startsWith('HTTP 401')?'chave JSONBin inválida':lastErr.startsWith('HTTP 403')?'sem permissão de escrita — use Read + Write':lastErr.startsWith('HTTP 404')?'banco não encontrado':lastErr.startsWith('HTTP 429')?'limite de requisições':lastErr.startsWith('HTTP 5')?'servidor indisponível':lastErr==='timeout'?'tempo esgotado':'erro de rede';
         syncUI(false,`${label} — ${pend} envio(s) pendente(s)`);
         break; // mantém na fila; retenta no próximo tick ou ao voltar online
       }
@@ -1696,12 +1706,12 @@ async function pullFromCloud(){
   if((DB._queue||[]).length){ syncUI(false,'há dados pendentes — enviando antes de atualizar'); return false; }
   LU.lastError='';
   try{
-    const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:jbHeaders(key,{'X-Bin-Meta-Only':'true'})});
+    const rm = await jbFetchWithAuthFallback(`${JB_BASE}/b/${bin}?meta=true`,key,{headers:{'X-Bin-Meta-Only':'true'}});
     if(!rm.ok){ LU.lastError='HTTP '+rm.status; return false; }
     const jm = await rm.json();
     const ver = jm.metadata?.version||0;
     if(ver < LU.cloudVer) return false; // nuvem mais antiga: não aceitar
-    const r = await fetch(`${JB_BASE}/b/${bin}/latest`,{headers:jbHeaders(key)});
+    const r = await jbFetchWithAuthFallback(`${JB_BASE}/b/${bin}/latest`,key);
     if(!r.ok){
       // 404 = bin criado mas vazio — NUNCA substituir dados locais por estado vazio
       if(r.status === 404){
@@ -1786,7 +1796,7 @@ async function carregarJBInterno(){
     await drainQueue(key, bin); // reenviar pendências primeiro
     if((DB._queue||[]).length||!navigator.onLine) return;
     try{
-      const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:jbHeaders(key,{'X-Bin-Meta-Only':'true'})});
+      const rm = await jbFetchWithAuthFallback(`${JB_BASE}/b/${bin}?meta=true`,key,{headers:{'X-Bin-Meta-Only':'true'}});
       if(!rm.ok){ syncUI(false,`JSONBin indisponível (HTTP ${rm.status}) — tentando reconectar`); agendarReconexao(); return; }
       const jm = await rm.json();
       const ver = jm.metadata?.version||0;
@@ -1794,7 +1804,7 @@ async function carregarJBInterno(){
         syncUI(true,'sync '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
         return; // nada novo na nuvem
       }
-      const r = await fetch(`${JB_BASE}/b/${bin}/latest`,{headers:jbHeaders(key)});
+      const r = await jbFetchWithAuthFallback(`${JB_BASE}/b/${bin}/latest`,key);
       if(!r.ok){ syncUI(false,`JSONBin indisponível (HTTP ${r.status}) — tentando reconectar`); agendarReconexao(); return; }
       const j = await r.json(); const d = j.record;
       if(!d || typeof d !== 'object') return;
@@ -1887,7 +1897,7 @@ async function conectarJSONBin(){
       const key = jbKey(), bin = jbBin(); if(!key || !bin) return;
       await drainQueue(key, bin);
       try{
-        const rm = await fetch(`${JB_BASE}/b/${bin}?meta=true`,{headers:jbHeaders(key,{'X-Bin-Meta-Only':'true'})});
+        const rm = await jbFetchWithAuthFallback(`${JB_BASE}/b/${bin}?meta=true`,key,{headers:{'X-Bin-Meta-Only':'true'}});
         if(!rm.ok) return;
         const jm = await rm.json();
         const ver = jm.metadata?.version||0;
@@ -1895,7 +1905,7 @@ async function conectarJSONBin(){
           syncUI(true,'sync '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
           return;
         }
-        const r2 = await fetch(`${JB_BASE}/b/${bin}/latest`,{headers:jbHeaders(key)});
+        const r2 = await jbFetchWithAuthFallback(`${JB_BASE}/b/${bin}/latest`,key);
         if(!r2.ok) return;
         const j2 = await r2.json(); const d = j2.record;
         if(!d || typeof d !== 'object') return;
@@ -2730,6 +2740,9 @@ function parseFinTXT(t0,opts={}){
   const t=t0.trim().toLowerCase();
   let tipo='desp';
   if(/receita|entrada|recebi|recebimento|recebida|pagamento recebido|ganhei|recebemos/i.test(t))tipo='rec';
+  const eEmprestimo=/peguei\s+emprest(?:ado|ada)|emprest(?:ado|ada)|empr[eé]stimo|financiad[oa]\s+por/i.test(t);
+  const eRecorrente=/todo\s+m[eê]s|mensal|mensalmente|recorrente|recorrentes|cada\s+m[eê]s/i.test(t);
+  let divAcao=eEmprestimo?'criar':null, divNome=null, divPeriodicidade=eRecorrente?'mensal':'', divVenc='';
   // Seção: empresa ou casa/pessoal
   let secao='desp';
   if(/casa|pessoal|de\s+casa|pra\s+casa|para\s+casa|minha\s+casa|doméstic|domestico|família|familia|residenc|lar/i.test(t))secao='casa';
@@ -2774,7 +2787,13 @@ function parseFinTXT(t0,opts={}){
   let div=null;
   const dvm=t.match(/(?:abater|pagar|pago|pagamento|parcela|entrada)\s+(?:da|do|de\s+)?(?:dívida|divida)\s+(.+?)(?:\s+(?:de|por|no valor de)\s+)?(\d[\d\.,]*)\s*$/i)
     ||t.match(/(?:dívida|divida)\s+(.+?)(?:\s+(?:de|por|no valor de)\s+)?(\d[\d\.,]*)\s*$/i);
-  if(dvm){const valorDiv=parseFloat((dvm[2]||'0').replace(/\./g,'').replace(',','.'));div={nome:fintxLimparNome(dvm[1]),valor:valorDiv||valor};}
+  if(dvm){const valorDiv=parseFloat((dvm[2]||'0').replace(/\./g,'').replace(',','.'));div={nome:fintxLimparNome(dvm[1]),valor:valorDiv||valor};divAcao='abater';divNome=div.nome;}
+  if(eEmprestimo){
+    const alvo=t.match(/(?:para|pra)\s+(?:pagar|cobrir|quitar)\s+(.+?)(?:\s+(?:de|por)\s+\d[\d\.,]*)?$/i);
+    divNome=fintxLimparNome(alvo?.[1]||'Empréstimo');
+    div={nome:divNome,valor};
+  }
+  if(eRecorrente&&!divPeriodicidade)divPeriodicidade='mensal';
   let nome=t0.trim();
   nome=nome.replace(/parcelad[oa]s?\s+(?:em\s+)?\d{1,2}\s*(?:vezes?|x)?/gi,'')
            .replace(/\d{1,2}\s*x\s*parcelad[oa]s?/gi,'')
@@ -2787,6 +2806,8 @@ function parseFinTXT(t0,opts={}){
            .trim();
   nome=fintxLimparNome(nome);
   nome=nome.replace(new RegExp('cartão|cartao|\\bc6\\b|\\bnu\\b|nubank|\\binter\\b|itaú|itau|bradesco|santander|\\bpan\\b|\\bbc\\b|caixa|sicredi|picpay|\\boriginal\\b|\\bnext\\b','gi'),'');
+  nome=nome.replace(/peguei\s+emprest(?:ado|ada)|emprest(?:ado|ada)|empr[eé]stimo|financiad[oa]\s+por/gi,'');
+  nome=nome.replace(/(?:para|pra)\s+(?:pagar|cobrir|quitar)/gi,'');
   nome=nome.replace(new RegExp('receita|entrada|recebi|recebimento|recebida|pagamento recebido|ganhei|\\bdia\\b|\\btodo\\b|\\bmês\\b|\\bmes\\b|\\bno\\b|\\bem\\b','gi'),'');
   nome=nome.replace(/(?:^|\s)(?:os|as|do|da|dos|das|um|uma|dum|duma|de|com|por|para|pra|na|nas|nos)(?=\s|$)/gi,' ')
            .replace(/(?:^|\s)(?:a|o)(?=\s|$)/g,' ')
@@ -2796,7 +2817,12 @@ function parseFinTXT(t0,opts={}){
   if(banco&&!nome.toLowerCase().startsWith(banco.toLowerCase()))desc=`${banco} — ${nome}`;
   if(comprador)desc+=` · comprado por ${comprador}`;
   if(loja)desc+=` · loja ${loja}`;
-  return{tipo,valor,desc,nome,pgto,parc,banco,comprador,loja,dia,mesInicio,secao,div,responsavel:detectarResponsavel(t0),valido:valor>0};
+  if(/seguro/i.test(t)&&!nome.toLowerCase().includes('seguro'))nome='Seguro '+nome;
+  desc=nome;
+  if(banco&&!nome.toLowerCase().startsWith(banco.toLowerCase()))desc=`${banco} — ${nome}`;
+  if(comprador)desc+=` · comprado por ${comprador}`;
+  if(loja)desc+=` · loja ${loja}`;
+  return{tipo,valor,desc,nome,pgto,parc,banco,comprador,loja,dia,mesInicio,secao,div,divAcao,divNome:divNome||div?.nome||null,divPeriodicidade,divVenc,responsavel:detectarResponsavel(t0),valido:valor>0};
 }
 function gerarParcelasFin(txt,opts={}){
   const p=parseFinTXT(txt,opts);
@@ -2811,13 +2837,13 @@ function gerarParcelasFin(txt,opts={}){
   for(let i=0;i<n;i++){let m=mesBase+i,a=anoBase;if(m>11){m-=12;a++;}
     const data=`${a}-${String(m+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
     const cat = p.banco?'Cartão de crédito':inferCat(p.nome);
-    parcelas.push({tipo:p.tipo,valor:valorP,desc:n>1?`${p.desc} (${i+1}/${n})`:p.desc,data,cat,rec:p.tipo==='rec'?'receita':'variavel',pgto:p.pgto,parc:n>1?n:null,secao:p.secao||'desp',divId:p.div?p.div.nome:null,responsavel:p.responsavel||detectarResponsavel(txt)});}
+    parcelas.push({tipo:p.tipo,valor:valorP,desc:n>1?`${p.desc} (${i+1}/${n})`:p.desc,data,cat,rec:p.tipo==='rec'?'receita':'variavel',pgto:p.pgto,parc:n>1?n:null,secao:p.secao||'desp',divId:p.div?p.div.nome:null,divAcao:p.divAcao||null,divNome:p.divNome||null,divPeriodicidade:p.divPeriodicidade||'',divVenc:p.divVenc||'',responsavel:p.responsavel||detectarResponsavel(txt)});}
     if(window._finTxtForcaPgto==='pix'||window._finTxtForcaPgto==='dinheiro'||window._finTxtForcaPgto==='debito'||window._finTxtForcaPgto==='credito-vista'){
     parcelas.forEach(p=>{p.pgto=window._finTxtForcaPgto;p.banco=null;if(window._finTxtForcaPgto!=='credito-vista')p.cat=p.secao==='casa'?'Alimentação':'Outro';});
   }
   if(window._finTxtForcaPgto==='credito-parcelado'){parcelas.forEach(p=>{p.pgto='credito-parcelado';p.cat='Cartão de crédito';p.banco=null;});}
 const _fp=window._finTxtForcaPgto;if(_fp==='credito-vista'){p.pgto='credito-vista';p.banco=null;}
-return{tipo:p.tipo,valor:p.valor,desc:p.desc,pgto:p.pgto,parc:n,banco:p.banco,dia,mesInicio:mesBase+1,anoInicio:anoBase,secao:p.secao,div:p.div,responsavel:p.responsavel,parcelas};
+  return{tipo:p.tipo,valor:p.valor,desc:p.desc,pgto:p.pgto,parc:n,banco:p.banco,dia,mesInicio:mesBase+1,anoInicio:anoBase,secao:p.secao,div:p.div,divAcao:p.divAcao,divNome:p.divNome,divPeriodicidade:p.divPeriodicidade,divVenc:p.divVenc,responsavel:p.responsavel,parcelas};
 }
 function interpretarFinTXT(){
   const txt=$('ft-txt').value.trim();if(!txt){toast('Escreva o lançamento. Ex: "cartão c6 compra de computador de 5.800 parcelado em 12"','err');return;}
@@ -2839,7 +2865,7 @@ function renderPreviewFinTxt(txt, r){
   const ini=`${FINTX_MESES[r.mesInicio-1]}/${r.anoInicio}`;
   const pgLabel={'pix':'Pix','dinheiro':' Dinheiro','debito':'Débito','credito-vista':'Crédito à vista','credito-parcelado':`Crédito ${r.parc}x`};
   const tipoLabel={'desp':r.secao==='casa'?'Despesa casa':'Despesa empresa','rec':'Receita'}[r.tipo]||'Lançamento';
-  const divTxt=r.div?`<div style="font-size:12px;color:var(--amber);font-weight:700;margin-top:6px">→ Vai abater a dívida "${r.div.nome}"</div>`:'';
+  const divTxt=r.divAcao==='criar'?`<div style="font-size:12px;color:var(--amber);font-weight:700;margin-top:6px">→ Vai lançar a despesa e criar a dívida "${escH(r.divNome||'Empréstimo')}"${r.divPeriodicidade?' · recorrente mensal':''}</div>`:r.divAcao==='abater'?`<div style="font-size:12px;color:var(--amber);font-weight:700;margin-top:6px">→ Vai registrar o pagamento e abater a dívida "${escH(r.divNome||r.div?.nome||'') }"</div>`:'';
   const pg=r.pgto?(pgLabel[r.pgto]+(r.banco?` · ${r.banco}`:'')):(r.banco?r.banco:'Sem forma de pagamento');
   const resumo=r.parcelas.length>1
     ?`<div style="display:flex;gap:8px">
@@ -2885,10 +2911,20 @@ async function confirmarFinTXT(){
   const dup=verificaDuplicacaoCartao(ps);
   if(dup&&!confirm(dup.aviso+'\n\nDeseja lançar mesmo assim?'))return;
   const n=ps.length;
-  let nDiv=0;
-  // Dívida: abater proporcionalmente a cada parcela
-  if(ps[0].divId){
-    const nomeDiv=ps[0].divId;
+  let nDiv=0, divCriada=null;
+  // Dívida: abater proporcionalmente a cada parcela ou criar a obrigação
+  // quando o texto disser que o valor foi emprestado.
+  if(ps[0].divAcao==='criar'){
+    const nomeDiv=ps[0].divNome||ps[0].divId||'Empréstimo';
+    const existente=arr(DB.div).find(d=>d.nome.toLowerCase()===nomeDiv.toLowerCase()&&d.recorrente===!!ps[0].divPeriodicidade);
+    if(existente)divCriada=existente;
+    else{
+      const idD=uid();
+      divCriada=DB.div[idD]={id:idD,nome:nomeDiv,cat:ps[0].secao==='casa'?'casa':'empresa',total:+ps.reduce((a,b)=>a+b.valor,0).toFixed(2),pago:0,pri:'media',venc:ps[0].divVenc||'',obs:'Criada por lançamento de texto',recorrente:!!ps[0].divPeriodicidade,periodicidade:ps[0].divPeriodicidade||'',proximoVencimento:ps[0].divVenc||''};
+    }
+    nDiv=1;
+  } else if(ps[0].divAcao==='abater'||ps[0].divId){
+    const nomeDiv=ps[0].divNome||ps[0].divId;
     let divObj=arr(DB.div).find(d=>d.nome.toLowerCase()===nomeDiv.toLowerCase());
     if(!divObj){
       const id=uid();DB.div[id]={id,nome:nomeDiv,cat:ps[0].secao==='casa'?'casa':'empresa',total:ps.reduce((a,b)=>a+b.valor,0),pago:0,pri:'media',obs:'Cadastrada por texto inteligente'};
@@ -2897,10 +2933,10 @@ async function confirmarFinTXT(){
     for(const p of ps){divObj.pago=+(Math.min((divObj.pago||0)+p.valor,divObj.total)).toFixed(2);}
     nDiv=ps.length;
   }
-  for(const p of ps){const id=uid();const {secao,divId,...rest}=p;DB.fin[id]={id,...rest,tipo:p.tipo||secao||'desp'};}
+  for(const p of ps){const id=uid();const {secao,divId,divAcao,divNome,divPeriodicidade,divVenc,...rest}=p;DB.fin[id]={id,...rest,tipo:p.tipo||secao||'desp'};if(divCriada)DB.fin[id].financiadoPorDividaId=divCriada.id;}
   window._finTxtPend=null;$('ft-txt').value='';
    await save();render();$('ft-prev').innerHTML='';
-  toast(nDiv?`${n} lançamento(s) salvo(s) — dívida "${ps[0].divId}" atualizada!`:`${n} lançamento(s) salvo(s)!`);
+  toast(nDiv?`${n} lançamento(s) salvo(s) — dívida "${ps[0].divNome||ps[0].divId||divCriada?.nome}" registrada/atualizada!`:`${n} lançamento(s) salvo(s)!`);
 }
 /* ── Classificação e mensagem (existente) ───────────── */
 /* ═══════ RELATÓRIO MENSAL DE CARTÕES (v10) ══════════ */
@@ -3289,8 +3325,9 @@ async function addDiv(){
   const nome=$('dvn').value.trim(),total=+$('dvt').value||0;
   if(!nome||!total){toast('Preencha nome e valor','err');return;}
   const id=uid();
-  DB.div[id]={id,nome,cat:$('dvcat').value,total,pago:+$('dvp').value||0,pri:$('dvpri').value,venc:$('dvv').value||'',pg:$('dvpg').value.trim()};
-  await save();['dvn','dvt','dvp','dvpg'].forEach(i=>$(i).value='');toast('Dívida cadastrada');render();
+  const recorrente=$('dvrec').checked;
+  DB.div[id]={id,nome,cat:$('dvcat').value,total,pago:+$('dvp').value||0,pri:$('dvpri').value,venc:$('dvv').value||'',pg:$('dvpg').value.trim(),recorrente,periodicidade:recorrente?$('dvfreq').value:'',proximoVencimento:recorrente?($('dvprox').value||$('dvv').value||''):''};
+  await save();['dvn','dvt','dvp','dvpg','dvprox'].forEach(i=>$(i).value='');$('dvrec').checked=false;$('dvrec-bloco').style.display='none';toast('Dívida cadastrada');render();
 }
 async function abaterDiv(id){
   const v=parseFloat($('ab-'+id).value)||0;if(!v)return;
@@ -3314,6 +3351,7 @@ function abrirEditDiv(id){
   $('ediv-pago').value=d.pago||0;
   $('ediv-pri').value=d.pri||'media';$('ediv-venc').value=d.venc||'';
   $('ediv-pg').value=d.pg||'';
+  $('ediv-rec').checked=!!d.recorrente;$('ediv-freq').value=d.periodicidade||'mensal';$('ediv-prox').value=d.proximoVencimento||'';$('ediv-rec-bloco').style.display=d.recorrente?'grid':'none';
   $('ediv-obs').value=d.obs||'';
   const modal=$('div-modal');
   modal.style.display='flex';
@@ -3343,6 +3381,9 @@ async function salvarEditDiv(){
     pri:$('ediv-pri').value,
     venc:$('ediv-venc').value||'',
     pg:$('ediv-pg').value.trim(),
+    recorrente:$('ediv-rec').checked,
+    periodicidade:$('ediv-rec').checked?$('ediv-freq').value:'',
+    proximoVencimento:$('ediv-rec').checked?($('ediv-prox').value||$('ediv-venc').value||''):'',
     obs:$('ediv-obs').value.trim()
   };
    await save();fecharEditDiv();toast('Dívida atualizada');render();
@@ -5043,7 +5084,7 @@ function rDivs(){
         <!-- Header -->
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px">
           <div style="flex:1">
-            <div style="font-size:14px;font-weight:700">${priIcons[d.pri]||''} ${d.nome}${vencida?`<span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;background:rgba(176,98,80,.15);color:var(--rose);border:1px solid rgba(176,98,80,.3);margin-left:6px">Vencida ${fmtD(d.venc)}</span>`:''}</div>
+            <div style="font-size:14px;font-weight:700">${priIcons[d.pri]||''} ${d.nome}${d.recorrente?`<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:20px;background:rgba(155,126,248,.12);color:var(--vio2);border:1px solid rgba(155,126,248,.25);margin-left:6px">${d.periodicidade||'recorrente'}</span>`:''}${vencida?`<span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;background:rgba(176,98,80,.15);color:var(--rose);border:1px solid rgba(176,98,80,.3);margin-left:6px">Vencida ${fmtD(d.venc)}</span>`:''}</div>
             ${d.obs?`<div style="font-size:11px;color:var(--t2);margin-top:2px">${d.obs}</div>`:''}
           </div>
           <div style="text-align:right;flex-shrink:0">
