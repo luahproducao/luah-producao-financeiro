@@ -2550,7 +2550,8 @@ async function salvarSerie(){
   r.prazo=!isNaN(+r.termo)?+r.termo:(+$('rp').value||30);
   r.inicio=inicio;r.fim=$('rf').value||'';
   if($('rtp'))r.tipo=$('rtp').value;r.ferias=ferias;r.escalacao=escalacao;
-  gerarSerie(id);
+  // Não apagar/recriar shows ao editar: isso quebrava os vínculos das NFs e
+  // dos pagamentos. Atualiza os shows futuros mantendo seus IDs originais.
   aplicarEscalacaoSerieAosShows(id);
   editSerieId=null;_escalaTemp['r']={};
   limparFormSerie();
@@ -4563,7 +4564,30 @@ async function emitirNfShow(serieId, mesRef, showId, dtEmissao, dtPrazoFinanceir
 }
 
 async function marcarNfRecebida(key){
-   if(DB.nfMensal[key]) { DB.nfMensal[key].status='recebida'; await save(); toast('NF marcada como recebida!'); render(); }
+  const nf=DB.nfMensal[key];
+  if(!nf)return;
+  if(nf.status==='recebida'){toast('Esta NF já foi recebida e os músicos já foram calculados');return;}
+  nf.status='recebida';
+  const pagos=gerarPagamentosEquipeDaNota(nf);
+  await save();
+  toast('NF recebida! '+(pagos?pagos+' pagamento(s) de músico(s) calculado(s).':'Nenhum músico com valor previsto nesta NF.'));
+  render();
+}
+
+function gerarPagamentosEquipeDaNota(nf){
+  const shows=nf.showId?[DB.shows[nf.showId]]:arr(DB.shows).filter(s=>s.serieId===nf.serieId&&s.data?.startsWith(nf.mesRef)&&s.status!=='cancelado');
+  let criados=0;
+  shows.filter(Boolean).forEach(sh=>{
+    escList(sh).forEach(m=>{
+      const previsto=+(m.val||0);if(!m.mbId||previsto<=0)return;
+      const jaPago=arr(DB.pags).filter(p=>p.showRef===sh.id&&p.mbId===m.mbId).reduce((a,p)=>a+(+p.val||0),0);
+      const restante=+(previsto-jaPago).toFixed(2);if(restante<=0)return;
+      const mb=DB.equipe[m.mbId]||{};const id=uid();
+      DB.pags[id]={id,mbId:m.mbId,nome:mb.nome||m.nome||'?',fn:mb.fn||m.fn||'',val:restante,dt:nf.dtRecebimento||today(),ref:'show',showRef:sh.id,showNome:sh.nome,obs:'Pagamento automático da NF '+(nf.desc||nf.mesRef),nfRef:nf.id,automatico:true};
+      criados++;
+    });
+  });
+  return criados;
 }
 
 async function delNfMensal(key){
@@ -4633,7 +4657,7 @@ function rSeries(){
           <td style="padding:7px 6px;border-bottom:1px solid var(--line);font-size:12px;font-weight:700;text-align:right;white-space:nowrap">${fmt(sh.valor)}<br><span style="font-size:10px;color:var(--teal);font-weight:400">${fmt(sh.liq)} líq.</span></td>
           <td style="padding:7px 6px;border-bottom:1px solid var(--line);text-align:right">${
             nfInd
-              ? `<span class="bdg b" style="font-size:9px">NF ${fmtD(nfInd.dtEmissao)}</span>`
+              ? `${nfInd.status==='recebida'?`<span class="bdg g" style="font-size:9px">NF recebida</span>`:`<button class="btn sm g" style="font-size:10px;padding:4px 9px" onclick="marcarNfRecebida('${nfInd.id}')">Recebida</button>`}`
               : podeEmitir
                 ? `<button class="btn sm on" style="font-size:10px;padding:4px 9px" onclick="abrirNfShow('${r.id}','${mes}','${sh.id}')">+ NF</button>`
                 : `<span style="font-size:10px;color:var(--t3)">futuro</span>`
