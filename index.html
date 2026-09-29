@@ -2511,6 +2511,14 @@ function abrirEditSerie(id){
   $('rn').focus();
   toast('Editando série '+r.nome+' — altere e toque em Salvar alteração');
 }
+function serieDoShow(sh){
+  if(!sh)return null;
+  if(sh.serieId&&DB.series?.[sh.serieId])return sh.serieId;
+  if(!sh.serie)return null;
+  const nome=(sh.nome||'').trim().toLowerCase(), local=(sh.local||'').trim().toLowerCase();
+  const achada=Object.values(DB.series||{}).find(s=>(s.nome||'').trim().toLowerCase()===nome&&(!local||!(s.local||'').trim()||((s.local||'').trim().toLowerCase()===local)));
+  return achada?.id||null;
+}
 function cancelarEditarSerie(){
   editSerieId=null;_escalaTemp.r={};_escalaValTemp.r={};_escalaManualTemp.r={};
   if(typeof renderEscala==='function')renderEscala('r');
@@ -3873,6 +3881,7 @@ function addParcelaShow(scope='es'){
 /* ─── EDIÇÃO DE SHOW ────────────────────────────── */
 function abrirEditShow(id){
   const sh=DB.shows[id];if(!sh)return;
+  const sid=serieDoShow(sh);if(sid){abrirEditSerie(sid);return;}
   $('edit-show-id').value=id;
   $('es-nome').value=sh.nome||'';
   $('es-data').value=sh.data||'';
@@ -4319,7 +4328,7 @@ function abrirDetalheShow(id){
   const m=$('modal-show-detalhe');m.style.display='flex';
 }
 function fecharDetalheShow(){$('modal-show-detalhe').style.display='none';_detalheShowId=null;}
-function editarShowDetalhe(){const id=_detalheShowId,sh=id!=null?DB.shows[id]:null;fecharDetalheShow();if(!sh)return;sh.serieId?abrirEditSerie(sh.serieId):abrirEditShow(id);}
+function editarShowDetalhe(){const id=_detalheShowId,sh=id!=null?DB.shows[id]:null;fecharDetalheShow();if(!sh)return;const sid=serieDoShow(sh);sid?abrirEditSerie(sid):abrirEditShow(id);}
 async function duplicarShowDetalhe(){
   const id=_detalheShowId, sh=DB.shows[id]; if(!sh)return;
   const d=new Date((sh.data||today())+'T12:00'); d.setDate(d.getDate()+7);
@@ -4377,7 +4386,7 @@ function showItem(sh){
     ${escList(sh).length?`<div style="font-size:10px;color:var(--t3);margin-bottom:10px">Escalação: ${escList(sh).map(x=>x.nome).join(' · ')}</div>`:''}
     <!-- Ações compactas -->
     <div style="display:flex;gap:6px;flex-wrap:wrap">
-      <button onclick="${sh.serieId?`abrirEditSerie('${sh.serieId}')`:`abrirEditShow('${sh.id}')`}" style="flex:1;background:rgba(154,144,120,.05);color:var(--sky);border:1px solid rgba(154,144,120,.25);border-radius:8px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;font-family:Inter">${sh.serieId?'Editar série':'Editar'}</button>
+      <button onclick="${serieDoShow(sh)?`abrirEditSerie('${serieDoShow(sh)}')`:`abrirEditShow('${sh.id}')`}" style="flex:1;background:rgba(154,144,120,.05);color:var(--sky);border:1px solid rgba(154,144,120,.25);border-radius:8px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;font-family:Inter">${serieDoShow(sh)?'Editar série':'Editar'}</button>
       <button onclick="waEquipe('${sh.id}')" style="flex:1;background:rgba(37,211,102,.1);color:#25d366;border:1px solid rgba(37,211,102,.25);border-radius:8px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;font-family:Inter">WhatsApp</button>
       ${sh.serie?`<button onclick="cancelarOc('${sh.id}')" style="flex:1;background:rgba(176,98,80,.05);color:var(--rose);border:1px solid rgba(176,98,80,.25);border-radius:8px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;font-family:Inter">Cancelar</button>`:''}
       <button onclick="delShow('${sh.id}')" style="background:rgba(176,98,80,.05);color:var(--rose);border:1px solid rgba(176,98,80,.28);border-radius:8px;padding:8px 12px;font-size:12px;cursor:pointer;font-family:Inter">&times;</button>
