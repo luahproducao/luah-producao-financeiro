@@ -1432,9 +1432,10 @@ function syncUI(ok,msg){
   const isOffline=/offline|off-line|sem jsonbin|modo local|dados locais|local/.test(m.toLowerCase());
   const title=ok?'Conectado à nuvem':isJson?'JSONBin indisponível':isOffline?'Modo local':'Sincronização pendente';
   const color=ok?'var(--teal)':isJson?'var(--rose)':'var(--amber)';
+  const detalheAuth=/chave jsonbin inválida|sem permissão de escrita/i.test(m);
   const detail=ok?`Última verificação: ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`:`${escH(m)} · os dados locais continuam protegidos`;
   card.style.borderColor=color+'66'; card.style.background=ok?'rgba(70,180,155,.06)':'rgba(200,180,120,.06)';
-  card.innerHTML=`<span class="conn-dot" style="background:${color};box-shadow:0 0 0 4px ${color}22"></span><div style="min-width:0;flex:1"><div class="conn-title" style="color:${color}">${title}</div><div class="conn-detail">${detail}</div></div>${!ok?'<button class="conn-action" onclick="atualizarApp()">Tentar agora</button>':''}`;
+  card.innerHTML=`<span class="conn-dot" style="background:${color};box-shadow:0 0 0 4px ${color}22"></span><div style="min-width:0;flex:1"><div class="conn-title" style="color:${color}">${title}</div><div class="conn-detail">${detail}</div></div>${!ok?`<button class="conn-action" onclick="${detalheAuth?'abrirSetupConexao()':'atualizarApp()'}">${detalheAuth?'Corrigir chave':'Tentar agora'}</button>`:''}`;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -2002,6 +2003,14 @@ function entrarComConexaoExistente(){
   LU.cloudVer = 0;
   persistLU();
   carregarJB();
+}
+function abrirSetupConexao(){
+  const v=$('fb-setup-view');if(!v)return;
+  v.style.display='block';
+  const ki=$('jb-key-input'),bi=$('jb-bin-input');
+  if(ki)ki.value=jbKey(); if(bi)bi.value=jbBin();
+  mostrarConexaoDetetada(); trocarConexao(); modoSetup('usar');
+  const er=$('jb-err');if(er){er.textContent='Há '+((DB._queue||[]).length||0)+' envio(s) pendente(s). Troque apenas a chave ou o Bin ID; não crie um banco novo.';er.style.display='block';}
 }
 // Ocultar a detetada e voltar ao formulário para trocar a conexão
 function trocarConexao(){
