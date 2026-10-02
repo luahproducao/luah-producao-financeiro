@@ -780,6 +780,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
   <div class="itabs">
     <button class="itab on" onclick="sub('el',this)"> Equipe</button>
     <button class="itab"    onclick="sub('ea',this)">+ Membro</button>
+    <button class="itab"    onclick="sub('em',this)">Shows por músico</button>
     <button class="itab"    onclick="sub('ep',this)"> Pagamentos</button>
     <button class="itab"    onclick="sub('ec',this)"> Calcular</button>
   </div><div id="pan-eq" style="display:none;margin:10px 0"></div>
@@ -819,6 +820,13 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
       <button class="btn pri" id="btn-membro" onclick="addMembro()">Adicionar à equipe</button>
       <button class="btn sm ghost" id="cancel-edit-mb" style="display:none;margin-left:6px" onclick="cancelarEditarMembro()">Cancelar</button>
     </div>
+  </div>
+  <div id="em" style="display:none">
+    <div class="card" style="padding:11px 12px;margin-bottom:10px">
+      <div class="fg"><label>Integrante</label><select id="agenda-eq-membro" onchange="rAgendaEquipe()"><option value="">Selecione um integrante</option></select></div>
+      <div class="r2"><div class="fg"><label>Período</label><select id="agenda-eq-periodo" onchange="rAgendaEquipe()"><option value="todos">Todos</option><option value="futuros">Agendados</option><option value="realizados">Realizados</option></select></div><div class="fg"><label>Buscar local ou show</label><input id="agenda-eq-busca" oninput="rAgendaEquipe()" placeholder="Ex.: PDS Mar"></div></div>
+    </div>
+    <div id="agenda-eq-lista"></div>
   </div>
   <div id="ep" style="display:none">
     <div class="card">
@@ -2126,7 +2134,7 @@ window.addEventListener('pagehide',()=>{try{saveLocal();backupLocal();}catch(e){
 
 
 /* ═══════ NAV ═══════════════════════════════════ */
-const SUBS=['sa','ss','sna','sns','el','ea','ep','ec','fm','fd','fs','fcar','fx','na','ne'];
+const SUBS=['sa','ss','sna','sns','el','ea','em','ep','ec','fm','fd','fs','fcar','fx','na','ne'];
 let curTab='dash';
 const ROTAS_PRINCIPAIS=['dash','shows','equipe','fin','equip','notas','rel','dig'];
 
@@ -4809,6 +4817,32 @@ function abrirAgendaMembro(mbId){
     toast('Mostrando shows agendados deste integrante');
   },0);
 }
+function abrirEditorShowsMembro(mbId){
+  go('equipe');
+  setTimeout(()=>{
+    const tab=[...document.querySelectorAll('#v-equipe .itab')].find(x=>(x.getAttribute('onclick')||'').includes("sub('em'"));
+    sub('em',tab);
+    const sel=$('agenda-eq-membro');if(sel){sel.value=mbId;}
+    rAgendaEquipe();
+  },0);
+}
+function rAgendaEquipe(){
+  const e=$('agenda-eq-lista');if(!e)return;
+  const mbId=$('agenda-eq-membro')?.value||'',periodo=$('agenda-eq-periodo')?.value||'todos',busca=($('agenda-eq-busca')?.value||'').toLowerCase().trim();
+  const eq=arr(DB.equipe).sort((a,b)=>a.nome.localeCompare(b.nome));
+  const sel=$('agenda-eq-membro');if(sel){const atual=sel.value;sel.innerHTML='<option value="">Selecione um integrante</option>'+eq.map(m=>`<option value="${m.id}">${escH(m.nome)} · ${escH(m.fn||'')}</option>`).join('');sel.value=atual;}
+  if(!mbId){e.innerHTML='<div class="empty">Selecione um integrante para visualizar os shows em que ele está escalado.</div>';return;}
+  const hoje=today();
+  let shows=rAgendaMembro(mbId).filter(s=>(periodo==='futuros'?s.data>=hoje:periodo==='realizados'?s.data<hoje:true)&&(!busca||[s.nome,s.local,s.obs].filter(Boolean).join(' ').toLowerCase().includes(busca)));
+  const m=DB.equipe[mbId];
+  const cards=shows.map(s=>{
+    const esc=escList(s).find(x=>x.mbId===mbId)||{};
+    const status=s.status==='recebido'?'Recebido':s.status==='nf'?'NF emitida':s.data<hoje?'Realizado':'Agendado';
+    const cor=s.status==='recebido'?'var(--teal)':s.status==='nf'?'var(--vio2)':s.data<hoje?'var(--gold)':'var(--sky)';
+    return `<div class="item ig" style="margin-bottom:8px"><div class="ih"><div style="flex:1;min-width:0"><div class="iname">${escH(s.nome)} ${serieDoShow(s)?'<span class="bdg v" style="font-size:9px">SÉRIE</span>':''}</div><div class="imeta">${fmtD(s.data)} · ${s.hora||'—'} · ${escH(s.local||'Local não informado')}</div><div style="font-size:11px;margin-top:5px;color:${cor}">${status} · Valor do músico: ${fmt(esc.val||0)}</div></div><button class="btn sm edit" onclick="abrirEditShow('${s.id}',true)">Editar</button></div></div>`;
+  }).join('');
+  e.innerHTML=`<div class="card" style="padding:11px 12px;margin-bottom:10px"><b>${escH(m?.nome||'Integrante')}</b><div style="font-size:11px;color:var(--t3);margin-top:3px">${shows.length} show(s) encontrado(s) · toque em Editar para alterar somente a ocorrência</div></div>${cards||'<div class="empty">Nenhum show corresponde aos filtros.</div>'}`;
+}
 function rAgendaMembro(mbId){
   const hoje=today();
   const shows=arr(DB.shows).filter(s=>s.status!=='cancelado'&&escList(s).some(x=>x.mbId===mbId));
@@ -4898,6 +4932,7 @@ function rEq(){
             ${saldo > 0 ? `<button class="btn sm g" style="margin-top:8px;width:100%" onclick="prepararPagamentoEquipe('${m.id}')">Registrar pagamento de ${fmt(saldo)}</button>` : ''}
             ${detalhesHtml}
             ${agendaMembroHtml(m.id)}
+            <button class="btn sm ghost" style="width:100%;margin-top:8px" onclick="abrirEditorShowsMembro('${m.id}')">Ver e editar shows deste músico</button>
           </div>
           ${ps.length?`
           <div style="font-size:10px;font-weight:700;color:var(--vio2);text-transform:uppercase;letter-spacing:.6px;margin:8px 0 5px">Recebido por show</div>
