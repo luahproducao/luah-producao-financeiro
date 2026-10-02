@@ -2166,6 +2166,7 @@ function sub(id,btn){
   if(id==='sna'){garantirArtista();setTimeout(()=>{autoEscala('s');renderEscala('s');},50);}
   if(id==='sns'){garantirArtista();setTimeout(()=>{autoEscala('r');renderEscala('r');},50);}
   render();
+  if(id==='em')setTimeout(rAgendaEquipe,0);
 }
 
 /* ═══════ QUICK-ADD ═════════════════════════════ */
@@ -4822,15 +4823,16 @@ function abrirEditorShowsMembro(mbId){
   setTimeout(()=>{
     const tab=[...document.querySelectorAll('#v-equipe .itab')].find(x=>(x.getAttribute('onclick')||'').includes("sub('em'"));
     sub('em',tab);
+    rAgendaEquipe();
     const sel=$('agenda-eq-membro');if(sel){sel.value=mbId;}
     rAgendaEquipe();
   },0);
 }
 function rAgendaEquipe(){
   const e=$('agenda-eq-lista');if(!e)return;
-  const mbId=$('agenda-eq-membro')?.value||'',periodo=$('agenda-eq-periodo')?.value||'todos',busca=($('agenda-eq-busca')?.value||'').toLowerCase().trim();
+  const periodo=$('agenda-eq-periodo')?.value||'todos',busca=($('agenda-eq-busca')?.value||'').toLowerCase().trim();
   const eq=arr(DB.equipe).sort((a,b)=>a.nome.localeCompare(b.nome));
-  const sel=$('agenda-eq-membro');if(sel){const atual=sel.value;sel.innerHTML='<option value="">Selecione um integrante</option>'+eq.map(m=>`<option value="${m.id}">${escH(m.nome)} · ${escH(m.fn||'')}</option>`).join('');sel.value=atual;}
+  const sel=$('agenda-eq-membro');let mbId='';if(sel){const atual=sel.value;sel.innerHTML='<option value="">Selecione um integrante</option>'+eq.map(m=>`<option value="${m.id}">${escH(m.nome)} · ${escH(m.fn||'')}</option>`).join('');if(eq.some(m=>m.id===atual))sel.value=atual;mbId=sel.value||'';}
   if(!mbId){e.innerHTML='<div class="empty">Selecione um integrante para visualizar os shows em que ele está escalado.</div>';return;}
   const hoje=today();
   let shows=rAgendaMembro(mbId).filter(s=>(periodo==='futuros'?s.data>=hoje:periodo==='realizados'?s.data<hoje:true)&&(!busca||[s.nome,s.local,s.obs].filter(Boolean).join(' ').toLowerCase().includes(busca)));
