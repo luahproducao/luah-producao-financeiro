@@ -3910,9 +3910,9 @@ function addParcelaShow(scope='es'){
 }
 
 /* ─── EDIÇÃO DE SHOW ────────────────────────────── */
-function abrirEditShow(id){
+function abrirEditShow(id,forcarOcorrencia=false){
   const sh=DB.shows[id];if(!sh)return;
-  const sid=serieDoShow(sh);if(sid){abrirEditSerie(sid);return;}
+  const sid=serieDoShow(sh);if(sid&&!forcarOcorrencia){abrirEditSerie(sid);return;}
   $('edit-show-id').value=id;
   $('es-nome').value=sh.nome||'';
   $('es-data').value=sh.data||'';
@@ -4790,7 +4790,38 @@ async function abrirNfShow(serieId, mesRef, showId){
   let desc = null;
   try{ desc = prompt('Descrição do lançamento (opcional):', 'NF individual — '+s.nome); }catch(e){}
   await emitirNfShow(serieId, mesRef, showId, dt, prazo, desc||'');
-}function rEq(){
+}
+function abrirAgendaMembro(mbId){
+  go('shows');
+  setTimeout(()=>{
+    const tab=[...document.querySelectorAll('#v-shows .itab')].find(x=>(x.getAttribute('onclick')||'').includes("sub('sa'"));
+    sub('sa',tab);
+    const sel=$('f-show-musico');if(sel){sel.value=mbId;}
+    const mes=$('f-show-mes');if(mes)mes.value='';
+    rShows();
+    toast('Mostrando shows agendados deste integrante');
+  },0);
+}
+function rAgendaMembro(mbId){
+  const hoje=today();
+  const shows=arr(DB.shows).filter(s=>s.status!=='cancelado'&&escList(s).some(x=>x.mbId===mbId));
+  return shows.sort((a,b)=>{
+    const af=a.data>=hoje,bf=b.data>=hoje;
+    if(af!==bf)return af?-1:1;
+    return af?a.data.localeCompare(b.data):b.data.localeCompare(a.data);
+  });
+}
+function agendaMembroHtml(mbId){
+  const shows=rAgendaMembro(mbId);
+  if(!shows.length)return '<div style="font-size:11px;color:var(--t3);margin-top:8px">Nenhum show relacionado a este integrante.</div>';
+  const linhas=shows.slice(0,8).map(s=>`<div style="display:grid;grid-template-columns:50px 1fr auto;gap:7px;align-items:center;background:var(--s3);border-radius:8px;padding:7px 8px;font-size:11px">
+    <div style="text-align:center;color:var(--gold2);font-weight:700">${fmtD(s.data)}</div>
+    <div style="min-width:0"><div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escH(s.nome)} ${serieDoShow(s)?'<span class="bdg v" style="font-size:8px">SÉRIE</span>':''}</div><div style="color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escH(s.local||'Local não informado')} · ${s.hora||'—'} · <span style="color:${s.status==='recebido'?'var(--teal)':s.status==='nf'?'var(--vio2)':s.data<today()?'var(--gold)':'var(--sky)'}">${s.status==='recebido'?'Recebido':s.status==='nf'?'NF emitida':s.data<today()?'Realizado':'Agendado'}</span></div></div>
+    <button class="btn sm edit" onclick="abrirEditShow('${s.id}',true)" title="Editar somente esta ocorrência">Editar</button>
+  </div>`).join('');
+  return `<details style="margin-top:9px"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--vio2);text-transform:uppercase;letter-spacing:.6px">Shows do integrante (${shows.length})</summary><div style="display:flex;flex-direction:column;gap:5px;margin-top:7px">${linhas}${shows.length>8?`<button class="btn sm ghost" style="width:100%;margin-top:2px" onclick="abrirAgendaMembro('${mbId}')">Ver todos os shows deste integrante</button>`:''}</div></details>`;
+}
+function rEq(){
   const e=$('lista-eq');if(!e)return;
   const eq=arr(DB.equipe);
   const busca=($('eq-busca')?.value||'').trim().toLowerCase();
@@ -4859,6 +4890,7 @@ async function abrirNfShow(serieId, mesRef, showId){
             ${saldo > 0 ? `<div style="background:rgba(176,98,80,.08);padding:8px;border-radius:8px;font-size:11px;color:var(--rose);margin-top:9px;font-weight:700">⚠️ ${m.nome.split(' ')[0]} deve receber ${fmt(saldo)}.</div>` : ''}
             ${saldo > 0 ? `<button class="btn sm g" style="margin-top:8px;width:100%" onclick="prepararPagamentoEquipe('${m.id}')">Registrar pagamento de ${fmt(saldo)}</button>` : ''}
             ${detalhesHtml}
+            ${agendaMembroHtml(m.id)}
           </div>
           ${ps.length?`
           <div style="font-size:10px;font-weight:700;color:var(--vio2);text-transform:uppercase;letter-spacing:.6px;margin:8px 0 5px">Recebido por show</div>
