@@ -5010,28 +5010,27 @@ function imgShowData(day,mes){
   return `${m[1]}-${m[2]}-${String(+day).padStart(2,'0')}`;
 }
 function parseTabelaShowsOCR(text,mes){
-  const lines=String(text||'').split(/\r?\n/).map(x=>x.replace(/\s+/g,' ').trim()).filter(Boolean);
-  const all=lines.join(' '), eq=arr(DB.equipe), membro=eq.find(m=>m.nome&&all.toLowerCase().includes(m.nome.toLowerCase()));
-  const rows=[];
-  for(let i=0;i<lines.length;i++){
-    const line=lines[i];
-    if(/\b\d{1,2}\s*(?:h|:)\s*\d{2}\b/i.test(line))continue;
-    const dayMatch=line.match(/(?:^|\s)(\d{1,2})(?:\s*[,;]\s*(\d{1,2}))+|(?:^|\s)(\d{1,2})(?:\s|$)/);
-    if(!dayMatch||/cantores|raz[aã]o social|local|hor[aá]rio|dia da semana|valor|total|qtd/i.test(line))continue;
-    const window=lines.slice(Math.max(0,i-2),Math.min(lines.length,i+3)).join(' ');
-    const days=[...window.matchAll(/(?:^|[^\d])(\d{1,2})(?=[,;\s]|$)/g)].map(x=>+x[1]).filter(n=>n>=1&&n<=31);
-    const timeParts=window.match(/\b(\d{1,2})\s*(?:h|:)\s*(\d{2})\b/);
-    const validDays=[...new Set(days)].filter(n=>n!==+(timeParts?.[1]||0)&&n!==+(timeParts?.[2]||0));
-    if(!validDays.length)continue;
-    const hm=window.match(/\b([01]?\d|2[0-3])\s*(?:h|:|H)\s*([0-5]\d)?\b/);if(!hm)continue;
+  const lines=String(text||'').split(/\r?\n/).map(x=>x.replace(/[|]+/g,' ').replace(/\s+/g,' ').trim()).filter(Boolean);
+  const eq=arr(DB.equipe), rows=[], isWeek=/segunda|terça|ter[cç]a|quarta|quinta|sexta|s[áa]bado|domingo/i;
+  const timeRe=/\b([01]?\d|2[0-3])\s*(?:h|:|H)\s*([0-5]\d)?\b/i;
+  const timeIdx=lines.map((line,i)=>timeRe.test(line)?i:-1).filter(i=>i>=0);
+  const membroDaLinha=block=>eq.find(m=>{const n=String(m.nome||'').toLowerCase();return n&&block.toLowerCase().includes(n);})||eq.find(m=>{const parts=String(m.nome||'').toLowerCase().split(/\s+/).filter(x=>x.length>3);return parts.length>=2&&parts.filter(p=>block.toLowerCase().includes(p)).length>=2;});
+  timeIdx.forEach((ti,k)=>{
+    const next=timeIdx[k+1]??lines.length, before=lines.slice(Math.max(0,ti-4),ti), after=lines.slice(ti,next);
+    const hm=lines[ti].match(timeRe);if(!hm)return;
     const hora=`${String(+hm[1]).padStart(2,'0')}:${String(+(hm[2]||0)).padStart(2,'0')}`;
-    const vals=[...window.matchAll(/R\$?\s*[\d.]+(?:,\d{2})?/gi)].map(x=>imgShowValor(x[0])).filter(v=>v>0);
-    const unit=vals.length?vals[0]:0;
-    const weekday=(window.match(/segunda|terça|ter[cç]a|quarta|quinta|sexta|s[áa]bado|domingo/i)||[])[0]||'';
-    const before=lines.slice(Math.max(0,i-3),i).filter(x=>!/[\d$]|R\$/i.test(x)&&!/^segunda|^terça|^ter[cç]a|^quarta|^quinta|^sexta|^s[áa]bado|^domingo/i.test(x));
-    const local=(before[before.length-1]||'').replace(/\bPDS\b/i,'').trim()||'Local não identificado';
+    const block=before.concat(after).join(' '), membro=membroDaLinha(block);
+    const weekday=(block.match(isWeek)||[])[0]||'';
+    const dateLines=after.slice(1).filter(x=>!timeRe.test(x)&&!isWeek.test(x));
+    const dateText=dateLines.join(' ');
+    const days=[...dateText.matchAll(/(?:^|[^\d])(\d{1,2})(?=\s*[,;]|\s*$)/g)].map(x=>+x[1]).filter(n=>n>=1&&n<=31);
+    const validDays=[...new Set(days)];if(!validDays.length)return;
+    const vals=[...block.matchAll(/R\$?\s*[\d.]+(?:,\d{2})?/gi)].map(x=>imgShowValor(x[0])).filter(v=>v>0);
+    const unit=vals[0]||0;
+    const localCandidates=before.filter(x=>!timeRe.test(x)&&!isWeek.test(x)&&!/[\d$]|R\$/i.test(x)&&!/cantores|raz[aã]o social|local|hor[aá]rio|dia da semana|valor|total|qtd/i.test(x));
+    const local=(localCandidates.find(x=>/\bPDS\b|\blobby\b|\bsol\b|\bbrisa\b/i.test(x))||localCandidates[localCandidates.length-1]||'Local não identificado').trim();
     validDays.forEach(day=>rows.push({data:imgShowData(day,mes),nome:local,local, hora, weekday, valor:unit, mbId:membro?.id||'', membro:membro?.nome||'Integrante não identificado', status:'agendado'}));
-  }
+  });
   const seen=new Set();return rows.filter(r=>{const k=[r.data,r.local,r.hora].join('|');if(seen.has(k))return false;seen.add(k);return true;});
 }
 function renderShowImagePreview(){
