@@ -1232,6 +1232,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
       <div style="font-size:12px;font-weight:700;color:var(--gold2);margin-bottom:6px">Importar tabela por imagem</div>
       <div style="font-size:11px;color:var(--t3);line-height:1.45;margin-bottom:8px">Fotografe ou selecione uma tabela. O app tentará separar local, horário, datas, integrante e valores. Confira tudo antes de salvar.</div>
       <div class="r2"><div class="fg"><label>Mês/ano das datas</label><input id="img-shows-mes" type="month"></div><div class="fg"><label>Imagem</label><input id="img-shows-file" type="file" accept="image/*" onchange="lerTabelaShowsImagem(this)" style="font-size:11px;padding:7px"></div></div>
+      <div class="fg"><label>Referências / abreviações (opcional)</label><input id="img-shows-ref" value="PDS=Pôr do Sol" placeholder="Ex.: PDS=Pôr do Sol; CT=Centro de Tradições" style="font-size:11px"></div>
       <div id="img-shows-status" style="font-size:11px;color:var(--t3);margin-top:5px"></div>
       <div id="img-shows-prev" style="margin-top:8px"></div>
     </div>
@@ -5093,9 +5094,17 @@ function imgShowData(day,mes){
   const m=String(mes||today().slice(0,7)).match(/^(\d{4})-(\d{2})$/);if(!m)return today();
   return `${m[1]}-${m[2]}-${String(+day).padStart(2,'0')}`;
 }
-function parseTabelaShowsOCR(text,mes){
+function imgShowRefs(raw){
+  const refs={pds:'Pôr do Sol'};
+  String(raw||'').split(/[;\n]+/).forEach(part=>{const m=part.match(/^\s*([^=:\-]+?)\s*[=:\-]\s*(.+?)\s*$/);if(m&&m[1].trim().length<=18)refs[m[1].trim().toLowerCase()]=m[2].trim();});
+  return refs;
+}
+function expandShowRefs(value,refs){
+  let out=String(value||'');Object.entries(refs||{}).sort((a,b)=>b[0].length-a[0].length).forEach(([k,v])=>{out=out.replace(new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`,'gi'),v);});return out;
+}
+function parseTabelaShowsOCR(text,mes,refText){
   const lines=String(text||'').split(/\r?\n/).map(x=>x.replace(/[|]+/g,' ').replace(/\s+/g,' ').trim()).filter(Boolean);
-  const eq=arr(DB.equipe), rows=[], isWeek=/segunda|terça|ter[cç]a|quarta|quinta|sexta|s[áa]bado|domingo/i;
+  const refs=imgShowRefs(refText), eq=arr(DB.equipe), rows=[], isWeek=/segunda|terça|ter[cç]a|quarta|quinta|sexta|s[áa]bado|domingo/i;
   const timeRe=/\b([01]?\d|2[0-3])\s*(?:h|:|H)\s*([0-5]\d)?\b/i;
   const timeIdx=lines.map((line,i)=>timeRe.test(line)?i:-1).filter(i=>i>=0);
   const membroDaLinha=block=>eq.find(m=>{const n=String(m.nome||'').toLowerCase();return n&&block.toLowerCase().includes(n);})||eq.find(m=>{const parts=String(m.nome||'').toLowerCase().split(/\s+/).filter(x=>x.length>3);return parts.length>=2&&parts.filter(p=>block.toLowerCase().includes(p)).length>=2;});
@@ -5106,32 +5115,35 @@ function parseTabelaShowsOCR(text,mes){
     const block=before.concat(after).join(' '), membro=membroDaLinha(block);
     const weekday=(block.match(isWeek)||[])[0]||'';
     const dateLines=after.slice(1).filter(x=>!timeRe.test(x)&&!isWeek.test(x));
-    const dateText=dateLines.join(' ');
-    const days=[...dateText.matchAll(/(?:^|[^\d])(\d{1,2})(?=\s*[,;]|\s*$)/g)].map(x=>+x[1]).filter(n=>n>=1&&n<=31);
+    const dateText=dateLines.filter(x=>/\b\d{1,2}\b(?:\s*[,;]\s*\d{1,2})/.test(x)).join(' ');
+    const days=(dateText.match(/\b\d{1,2}\b/g)||[]).map(Number).filter(n=>n>=1&&n<=31);
     const validDays=[...new Set(days)];if(!validDays.length)return;
     const vals=[...block.matchAll(/R\$?\s*[\d.]+(?:,\d{2})?/gi)].map(x=>imgShowValor(x[0])).filter(v=>v>0);
     const unit=vals[0]||0;
     const localCandidates=before.filter(x=>!timeRe.test(x)&&!isWeek.test(x)&&!/[\d$]|R\$/i.test(x)&&!/cantores|raz[aã]o social|local|hor[aá]rio|dia da semana|valor|total|qtd/i.test(x));
-    const local=(localCandidates.find(x=>/\bPDS\b|\blobby\b|\bsol\b|\bbrisa\b/i.test(x))||localCandidates[localCandidates.length-1]||'Local não identificado').trim();
-    validDays.forEach(day=>rows.push({data:imgShowData(day,mes),nome:local,local, hora, weekday, valor:unit, mbId:membro?.id||'', membro:membro?.nome||'Integrante não identificado', status:'agendado'}));
+    const locIdx=before.findIndex(x=>/\bPDS\b/i.test(x));
+    const localRaw=(locIdx>=0?before[locIdx]:(localCandidates.find(x=>/\blobby\b|\bsol\b|\bbrisa\b/i.test(x))||localCandidates[localCandidates.length-1]||'Local não identificado')).trim();
+    const contratante=(before.slice(0,locIdx>=0?locIdx:before.length).filter(x=>!timeRe.test(x)&&!isWeek.test(x)&&x!==localRaw&&!/[\d$]|R\$/i.test(x)&&!/cantores|raz[aã]o social|local|hor[aá]rio|dia da semana|valor|total|qtd/i.test(x)&&(!membro||x.toLowerCase()!==String(membro.nome||'').toLowerCase())).filter(x=>x.split(/\s+/).length>=2).pop()||'').trim();
+    const local=expandShowRefs(localRaw,refs),contr=expandShowRefs(contratante,refs);
+    validDays.forEach(day=>rows.push({data:imgShowData(day,mes),nome:local,local,contratante:contr, hora, weekday, valor:unit, mbId:membro?.id||'', membro:membro?.nome||'Integrante não identificado', status:'agendado',referenciaOriginal:localRaw}));
   });
   const seen=new Set();return rows.filter(r=>{const k=[r.data,r.local,r.hora].join('|');if(seen.has(k))return false;seen.add(k);return true;});
 }
 function renderShowImagePreview(){
   const e=$('img-shows-prev');if(!e)return;
   if(!_imgShowsRows.length){e.innerHTML='';return;}
-  e.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:9px"><div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:7px">Prévia — ${_imgShowsRows.length} show(s) identificado(s)</div>${_imgShowsRows.map((r,i)=>`<div style="display:grid;grid-template-columns:1fr 82px;gap:6px;background:var(--s2);padding:7px;border-radius:8px;margin-bottom:6px"><input id="is-nome-${i}" value="${escH(r.nome)}" placeholder="Nome/local"><input id="is-val-${i}" type="number" step="0.01" value="${r.valor||0}"><input id="is-data-${i}" type="date" value="${r.data}"><input id="is-hora-${i}" type="time" value="${r.hora}"><select id="is-mb-${i}">${arr(DB.equipe).map(m=>`<option value="${m.id}" ${m.id===r.mbId?'selected':''}>${escH(m.nome)}</option>`).join('')}<option value="">Sem integrante</option></select><span style="font-size:10px;color:var(--t3);align-self:center">${escH(r.weekday||'')}</span></div>`).join('')}<div style="display:flex;gap:7px"><button class="btn pri" onclick="confirmarShowsImagem()">Confirmar e lançar shows</button><button class="btn ghost" onclick="_imgShowsRows=[];renderShowImagePreview()">Descartar</button></div></div>`;
+  e.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:9px"><div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:7px">Prévia — ${_imgShowsRows.length} show(s) identificado(s)</div>${_imgShowsRows.map((r,i)=>`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--s2);padding:7px;border-radius:8px;margin-bottom:6px"><input id="is-nome-${i}" value="${escH(r.nome)}" placeholder="Nome do show"><input id="is-contr-${i}" value="${escH(r.contratante||'')}" placeholder="Contratante"><input id="is-local-${i}" value="${escH(r.local||'')}" placeholder="Local"><input id="is-val-${i}" type="number" step="0.01" value="${r.valor||0}" placeholder="Valor unitário"><input id="is-data-${i}" type="date" value="${r.data}"><input id="is-hora-${i}" type="time" value="${r.hora}"><select id="is-mb-${i}">${arr(DB.equipe).map(m=>`<option value="${m.id}" ${m.id===r.mbId?'selected':''}>${escH(m.nome)}</option>`).join('')}<option value="">Sem integrante</option></select><span style="font-size:10px;color:var(--t3);align-self:center">${escH(r.weekday||'')}</span></div>`).join('')}<div style="display:flex;gap:7px"><button class="btn pri" onclick="confirmarShowsImagem()">Confirmar e lançar shows</button><button class="btn ghost" onclick="_imgShowsRows=[];renderShowImagePreview()">Descartar</button></div></div>`;
 }
 async function lerTabelaShowsImagem(input){
   const file=input?.files?.[0];if(!file)return;
   const status=$('img-shows-status');_imgShowsRows=[];renderShowImagePreview();status.textContent='Lendo tabela…';
-  try{if(!window.Tesseract)throw new Error('OCR indisponível — abra o app com internet.');const out=await Tesseract.recognize(file,'por',{logger:m=>{if(m.status==='recognizing text')status.textContent=`Lendo tabela… ${Math.round((m.progress||0)*100)}%`;}});_imgShowsRows=parseTabelaShowsOCR(out.data?.text||'',$('img-shows-mes')?.value||today().slice(0,7));status.textContent=_imgShowsRows.length?`${_imgShowsRows.length} show(s) encontrado(s). Revise a prévia.`:'Não consegui separar as linhas. Tente uma foto mais nítida ou use o lançamento por texto.';renderShowImagePreview();}catch(e){status.textContent=e.message||'Não foi possível ler a imagem.';}
+  try{if(!window.Tesseract)throw new Error('OCR indisponível — abra o app com internet.');const out=await Tesseract.recognize(file,'por',{logger:m=>{if(m.status==='recognizing text')status.textContent=`Lendo tabela… ${Math.round((m.progress||0)*100)}%`;}});_imgShowsRows=parseTabelaShowsOCR(out.data?.text||'',$('img-shows-mes')?.value||today().slice(0,7),$('img-shows-ref')?.value||'');status.textContent=_imgShowsRows.length?`${_imgShowsRows.length} show(s) encontrado(s). Revise a prévia.`:'Não consegui separar as linhas. Tente uma foto mais nítida ou use o lançamento por texto.';renderShowImagePreview();}catch(e){status.textContent=e.message||'Não foi possível ler a imagem.';}
 }
 async function confirmarShowsImagem(){
-  const rows=_imgShowsRows.map((r,i)=>({...r,nome:$(`is-nome-${i}`)?.value.trim()||r.nome,valor:+$(`is-val-${i}`)?.value||0,data:$(`is-data-${i}`)?.value||r.data,hora:$(`is-hora-${i}`)?.value||r.hora,mbId:$(`is-mb-${i}`)?.value||''})).filter(r=>r.data&&r.nome);
+  const rows=_imgShowsRows.map((r,i)=>({...r,nome:$(`is-nome-${i}`)?.value.trim()||r.nome,local:$(`is-local-${i}`)?.value.trim()||r.local||r.nome,contratante:$(`is-contr-${i}`)?.value.trim()||r.contratante||'',valor:+$(`is-val-${i}`)?.value||0,data:$(`is-data-${i}`)?.value||r.data,hora:$(`is-hora-${i}`)?.value||r.hora,mbId:$(`is-mb-${i}`)?.value||''})).filter(r=>r.data&&r.nome);
   if(!rows.length){toast('Nenhum show válido para lançar','err');return;}
   if(!confirm(`Lançar ${rows.length} show(s) na agenda?`))return;
-  rows.forEach(r=>{const id=uid(),m=r.mbId&&DB.equipe[r.mbId];DB.shows[id]={id,nome:r.nome,data:r.data,hora:r.hora||'20:00',valor:r.valor,liq:+(r.valor*(1-ImpostoConfig())).toFixed(2),imp:+(r.valor*ImpostoConfig()).toFixed(2),prazo:30,termo:'30',tipo:'Show semanal fixo',obs:'Importado de tabela por imagem'+(r.weekday?' · '+r.weekday:''),local:r.local||r.nome,status:'agendado',recData:addDays(r.data,30),serie:false,falta:r.valor?[]:['valor'],escalacao:m?[{mbId:m.id,nome:m.nome,fn:m.fn,val:m.val||0}]:[]};});
+  rows.forEach(r=>{const id=uid(),m=r.mbId&&DB.equipe[r.mbId];DB.shows[id]={id,nome:r.nome,contratante:r.contratante||'',data:r.data,hora:r.hora||'20:00',valor:r.valor,liq:+(r.valor*(1-ImpostoConfig())).toFixed(2),imp:+(r.valor*ImpostoConfig()).toFixed(2),prazo:30,termo:'30',tipo:'Show semanal fixo',obs:'Importado de tabela por imagem'+(r.weekday?' · '+r.weekday:'')+(r.referenciaOriginal&&r.referenciaOriginal!==r.local?' · Referência: '+r.referenciaOriginal:''),local:r.local||r.nome,status:'agendado',recData:addDays(r.data,30),serie:false,falta:r.valor?[]:['valor'],escalacao:m?[{mbId:m.id,nome:m.nome,fn:m.fn,val:m.val||0}]:[]};});
   await save();_imgShowsRows=[];renderShowImagePreview();if($('img-shows-status'))$('img-shows-status').textContent='Shows lançados com sucesso.';render();toast(`${rows.length} show(s) adicionado(s) à agenda`);
 }
 function ocrData(text){
