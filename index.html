@@ -1467,7 +1467,10 @@ function syncUI(ok,msg){
   const detalheAuth=/chave jsonbin inválida|sem permissão de escrita/i.test(m);
   const detail=ok?`Última verificação: ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`:`${escH(m)} · os dados locais continuam protegidos`;
   card.style.borderColor=color+'66'; card.style.background=ok?'rgba(70,180,155,.06)':'rgba(200,180,120,.06)';
-  card.innerHTML=`<span class="conn-dot" style="background:${color};box-shadow:0 0 0 4px ${color}22"></span><div style="min-width:0;flex:1"><div class="conn-title" style="color:${color}">${title}</div><div class="conn-detail">${detail}</div></div>${!ok?`<button class="conn-action" onclick="${detalheAuth?'abrirSetupConexao()':'atualizarApp()'}">${detalheAuth?'Corrigir chave':'Tentar agora'}</button>`:''}`;
+  const temFila=!!(DB._queue&&DB._queue.length);
+  const acao=detalheAuth?(temFila?'repararSincronizacao()':'abrirSetupConexao()'):'atualizarApp()';
+  const texto=detalheAuth?(temFila?'Testar e reenviar':'Corrigir chave'):'Tentar agora';
+  card.innerHTML=`<span class="conn-dot" style="background:${color};box-shadow:0 0 0 4px ${color}22"></span><div style="min-width:0;flex:1"><div class="conn-title" style="color:${color}">${title}</div><div class="conn-detail">${detail}</div></div>${!ok?`<button class="conn-action" onclick="${acao}">${texto}</button>`:''}`;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -1753,6 +1756,30 @@ async function drainQueue(key, bin){
   return !(DB._queue&&DB._queue.length);
 }
 function cleanQueue(){ if(DB._queue) delete DB._queue; try{localStorage.removeItem(PENDING_KEY);}catch(e){} }
+async function repararSincronizacao(){
+  const key=jbKey(),bin=jbBin();if(!key||!bin){abrirSetupConexao();return;}
+  syncUI(false,'testando credencial e reenviando pendências…');
+  const modos=['master','access'];let leitura=null;
+  for(const modo of modos){
+    localStorage.setItem('luah_jb_auth',modo);
+    try{
+      const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),10000);
+      const r=await fetch(`${JB_BASE}/b/${bin}/latest`,{headers:jbHeaders(key),signal:ctrl.signal});clearTimeout(timer);
+      if(r.ok){leitura={modo};break;}
+      const body=(await r.text()).slice(0,120);LU.lastError=`HTTP ${r.status}${body?' — '+body:''}`;
+    }catch(e){LU.lastError=e.name==='AbortError'?'tempo esgotado':'erro de rede';}
+  }
+  if(!leitura){persistLU();syncUI(false,`chave JSONBin inválida ou sem leitura — ${(DB._queue||[]).length} envio(s) pendente(s)`);abrirSetupConexao();return;}
+  await drainQueue(key,bin);
+  if((DB._queue||[]).length){
+    const erro=LU.lastError||'sem permissão de escrita';
+    syncUI(false,`leitura OK (${leitura.modo}), mas envio recusado — ${(DB._queue||[]).length} pendente(s)`);
+    toast(erro.includes('403')?'A chave lê o banco, mas não tem permissão Write. Crie Access Key com Read + Write.':'O banco foi localizado, mas o envio ainda foi recusado.','err');
+    return;
+  }
+  LU.lastError='';persistLU();syncUI(true,'sincronizado — fila reenviada');toast('Os envios pendentes foram sincronizados.');
+  await pullFromCloud();
+}
 
 // Traz os dados da nuvem APENAS se não estiverem desatualizados face ao último push local
 async function pullFromCloud(){
@@ -4677,7 +4704,9 @@ function calcDevidoMembro(m,mesRef=''){
   },0);
 }
 function calcPagoMembro(m,mesRef=''){
-  return arr(DB.pags).filter(p=>p.mbId===m.id&&(!mesRef||String(p.dt||'').startsWith(mesRef))).reduce((acc,p)=>acc+(+p.val||0),0);
+  const registrados=arr(DB.pags).filter(p=>p.mbId===m.id&&(!mesRef||String(p.dt||'').startsWith(mesRef))).reduce((acc,p)=>acc+(+p.val||0),0);
+  const dividas=arr(DB.div).filter(d=>d.equipeMbId===m.id).reduce((acc,d)=>acc+arr(d.pagamentos).filter(p=>!mesRef||String(p.data||'').startsWith(mesRef)).reduce((s,p)=>s+(+p.valor||0),0),0);
+  return registrados+dividas;
 }
 function calcSaldoMembro(m,mesRef=''){
   return calcDevidoMembro(m,mesRef)-calcPagoMembro(m,mesRef);
@@ -4887,7 +4916,7 @@ function rEq(){
   const mesAtual=today().slice(0,7);
   const totalPrev=eq.reduce((a,m)=>a+calcDevidoMembro(m),0);
   const totalPago=eq.reduce((a,m)=>a+calcPagoMembro(m),0);
-  const totalPendente=totalPrev-totalPago;
+  const totalPendente=Math.max(0,totalPrev-totalPago);
   const totalMes=eq.reduce((a,m)=>a+calcDevidoMembro(m,mesAtual),0);
   const pagoMes=eq.reduce((a,m)=>a+calcPagoMembro(m,mesAtual),0);
   const info=(tP>0?`<div class="notice ${tP>100?'err':'ok'}" style="margin-bottom:9px">${tP>100?'️ Total alocado '+tP.toFixed(1)+'% — passa de 100%':'Alocado: '+tP.toFixed(1)+'% · Saldo artista: '+(100-tP).toFixed(1)+'%'}</div>`:'')+
@@ -4925,7 +4954,8 @@ function rEq(){
     const totalMembro=ps.reduce((a,g)=>a+g.total,0);
     const devido=calcDevidoMembro(m);
     const pago=calcPagoMembro(m);
-    const saldo = devido-pago;
+    const saldo = Math.max(0,devido-pago);
+    const dividaEquipe=arr(DB.div).find(d=>d.equipeMbId===m.id);
     const devidoMes=calcDevidoMembro(m,mesAtual);
     const pagoMesM=calcPagoMembro(m,mesAtual);
     const detalhes=detalhesShowsMembro(m.id);
@@ -4942,7 +4972,7 @@ function rEq(){
               <div style="background:var(--s3);border-radius:7px;padding:6px;text-align:center"><div style="font-size:8px;color:var(--t3);text-transform:uppercase">Pendente</div><b style="font-size:12px;color:${saldo>0?'var(--rose)':'var(--teal)'}">${fmt(saldo)}</b></div>
             </div>
             <div style="font-size:10px;color:var(--t3);margin-top:6px">Período ${mesFiltro}: ${fmt(devidoMes)} previsto · ${fmt(pagoMesM)} pago · ${fmt(devidoMes-pagoMesM)} pendente</div>
-            ${saldo > 0 ? `<div style="background:rgba(176,98,80,.08);padding:8px;border-radius:8px;font-size:11px;color:var(--rose);margin-top:9px;font-weight:700">⚠️ ${m.nome.split(' ')[0]} deve receber ${fmt(saldo)}.</div>` : ''}
+            ${saldo > 0 ? `<div style="background:rgba(176,98,80,.08);padding:8px;border-radius:8px;font-size:11px;color:var(--rose);margin-top:9px;font-weight:700">⚠️ ${m.nome.split(' ')[0]} deve receber ${fmt(saldo)}.</div>` : `<div style="background:rgba(70,180,155,.08);padding:8px;border-radius:8px;font-size:11px;color:var(--teal);margin-top:9px;font-weight:700">Pagamento em dia${dividaEquipe?' · dívida da equipe quitada':''}.</div>`}
             ${saldo > 0 ? `<button class="btn sm g" style="margin-top:8px;width:100%" onclick="criarDividaEquipe('${m.id}')">Pagar saldo devido · ${fmt(saldo)}</button>` : ''}
             ${detalhesHtml}
             ${agendaMembroHtml(m.id)}
