@@ -2382,16 +2382,6 @@ function initDiasSemana(){
   autoDiaSemana('ri','lbl-dia-ri');
   autoDiaSerie();
 }
-function calcSaldoMembro(m){
-  if(!m) return 0;
-  const mbId = m.id;
-  const devidoShows = arr(DB.shows)
-    .filter(s => s.status !== 'cancelado')
-    .reduce((acc, s) => acc + (escList(s).find(x => x.mbId === mbId)?.val || 0), 0);
-  const proLabore = (m.pro || 0);
-  const pago = arr(DB.pags).filter(p => p.mbId === mbId).reduce((acc, p) => acc + (p.val || 0), 0);
-  return devidoShows + proLabore - pago;
-}
 function rAvisos(){
   const e=$('avisos');if(!e)return;
   const avisos=[];
@@ -2721,6 +2711,9 @@ async function salvarMembro(){
 }
 async function addMembro(){
   const nome=$('mn').value.trim();if(!nome){toast('Informe o nome','err');return;}
+  const chave=nome.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ');
+  const existente=arr(DB.equipe).find(m=>String(m.nome||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ')===chave);
+  if(existente){toast(`${existente.nome} já está cadastrado na equipe`,'err');editarMembro(existente.id);return;}
   const id=uid();
   DB.equipe[id]={id,nome,fn:$('mf').value,val:+$('mv').value||0,perc:+$('mp').value||0,ref:+$('mref').value||0,pro:+$('mpro').value||0,proP:+$('mproP').value||0,wa:$('mwa').value.trim()};
    await save();limparFormMembro();toast('Membro adicionado!');render();
@@ -4890,7 +4883,8 @@ function rAgendaEquipe(){
     return `<div class="item ig" style="margin-bottom:8px"><div class="ih"><div style="flex:1;min-width:0"><div class="iname">${escH(s.nome)} ${serieDoShow(s)?'<span class="bdg v" style="font-size:9px">SÉRIE</span>':''}</div><div class="imeta">${fmtD(s.data)} · ${s.hora||'—'} · ${escH(s.local||'Local não informado')}</div><div style="font-size:11px;margin-top:5px;color:${cor}">${status} · Valor do músico: ${fmt(esc.val||0)}</div></div><button class="btn sm edit" onclick="abrirEditShow('${s.id}',true)">Editar</button></div></div>`;
   }).join('');
   const saldo=Math.max(0,calcSaldoMembro(m||{}));
-  e.innerHTML=`<div class="card" style="padding:11px 12px;margin-bottom:10px"><b>${escH(m?.nome||'Integrante')}</b><div style="font-size:11px;color:var(--t3);margin-top:3px">${shows.length} show(s) encontrado(s) · toque em Editar para alterar somente a ocorrência</div>${saldo>0?`<button class="btn sm g" style="width:100%;margin-top:8px" onclick="criarDividaEquipe('${mbId}')">Pagar saldo devido · ${fmt(saldo)}</button>`:''}</div>${cards||'<div class="empty">Nenhum show corresponde aos filtros.</div>'}`;
+  const devido=calcDevidoMembro(m||{}),pago=calcPagoMembro(m||{});
+  e.innerHTML=`<div class="card" style="padding:11px 12px;margin-bottom:10px"><b>${escH(m?.nome||'Integrante')}</b><div style="font-size:11px;color:var(--t3);margin-top:3px">${shows.length} show(s) encontrado(s) · toque em Editar para alterar somente a ocorrência</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:9px"><div style="text-align:center;background:var(--s3);border-radius:7px;padding:6px;font-size:10px;color:var(--t3)">Previsto<br><b style="font-size:12px;color:var(--gold2)">${fmt(devido)}</b></div><div style="text-align:center;background:var(--s3);border-radius:7px;padding:6px;font-size:10px;color:var(--t3)">Pago<br><b style="font-size:12px;color:var(--teal)">${fmt(pago)}</b></div><div style="text-align:center;background:var(--s3);border-radius:7px;padding:6px;font-size:10px;color:var(--t3)">Pendente<br><b style="font-size:12px;color:${saldo?'var(--rose)':'var(--teal)'}">${fmt(saldo)}</b></div></div>${saldo>0?`<button class="btn sm g" style="width:100%;margin-top:8px" onclick="criarDividaEquipe('${mbId}')">Criar/atualizar dívida · ${fmt(saldo)}</button>`:`<div style="font-size:11px;color:var(--teal);margin-top:8px;font-weight:700">Pagamento em dia.</div>`}</div>${cards||'<div class="empty">Nenhum show corresponde aos filtros.</div>'}`;
 }
 function rAgendaMembro(mbId){
   const hoje=today();
@@ -4925,6 +4919,9 @@ function rEq(){
   const totalPendente=Math.max(0,totalPrev-totalPago);
   const totalMes=eq.reduce((a,m)=>a+calcDevidoMembro(m,mesAtual),0);
   const pagoMes=eq.reduce((a,m)=>a+calcPagoMembro(m,mesAtual),0);
+  const showsAtivos=arr(DB.shows).filter(s=>s.status!=='cancelado');
+  const semEquipe=showsAtivos.filter(s=>!escList(s).length).length;
+  const totalShowsEscalados=showsAtivos.reduce((a,s)=>a+escList(s).length,0);
   const info=(tP>0?`<div class="notice ${tP>100?'err':'ok'}" style="margin-bottom:9px">${tP>100?'️ Total alocado '+tP.toFixed(1)+'% — passa de 100%':'Alocado: '+tP.toFixed(1)+'% · Saldo artista: '+(100-tP).toFixed(1)+'%'}</div>`:'')+
     `<div class="card" style="margin-bottom:10px;padding:11px 12px">
       <div class="sl" style="margin:0 0 8px">Resumo da equipe</div>
@@ -4934,6 +4931,8 @@ function rEq(){
         <div style="background:var(--s3);border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--t3);text-transform:uppercase">Pendente</div><b style="color:${totalPendente>0?'var(--rose)':'var(--teal)'};font-size:13px">${fmt(totalPendente)}</b></div>
       </div>
       <div style="font-size:11px;color:var(--t2);margin-top:8px">Período atual (${MS[+mesAtual.slice(5)-1]} ${mesAtual.slice(0,4)}): previsão <b>${fmt(totalMes)}</b> · pago <b>${fmt(pagoMes)}</b> · pendente <b>${fmt(totalMes-pagoMes)}</b></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px"><button class="btn sm ghost" onclick="sub('em',document.querySelector('#v-equipe .itab[onclick*=\"sub(\\'em\\')\"]'))">Ver shows por músico (${totalShowsEscalados})</button><button class="btn sm ghost" onclick="sub('ep',document.querySelector('#v-equipe .itab[onclick*=\"sub(\\'ep\\')\"]'))">Ver histórico de pagamentos</button></div>
+      ${semEquipe?`<div class="notice err" style="margin-top:9px;font-size:11px">${semEquipe} show(s) sem integrantes. Abra a agenda do show para incluir a equipe.</div>`:''}
     </div>`;
   // Saldo devedor por membro (globalizado v21)
 
@@ -5006,20 +5005,25 @@ function rEq(){
     </div>`;
   }).join(''):`<p class="empty">${eq.length?'Nenhum membro corresponde aos filtros.':'Nenhum membro cadastrado.'}</p>`);
 }
+function pagamentosEquipeHistorico(){
+  const diretos=arr(DB.pags).map(p=>({...p,origem:'Pagamento da equipe'}));
+  const dividas=arr(DB.div).flatMap(d=>arr(d.pagamentos).filter(p=>d.equipeMbId).map(p=>({id:p.id,mbId:d.equipeMbId,nome:d.equipeNome||d.nome.replace(/^Equipe — /,''),fn:DB.equipe[d.equipeMbId]?.fn||'',val:+p.valor||0,dt:p.data||today(),ref:'dívida',obs:`${p.pgto||'Pagamento'} · ${d.nome}`,origem:'Pagamento via Dívidas'})));
+  return diretos.concat(dividas);
+}
 function rPags(){
   const e=$('lista-pag');if(!e)return;
   const fm=$('pag-filtro-mb');
   if(fm){const atual=fm.value;fm.innerHTML='<option value="">Todos os membros</option>'+arr(DB.equipe).sort((a,b)=>a.nome.localeCompare(b.nome)).map(m=>`<option value="${m.id}">${m.nome}</option>`).join('');fm.value=atual;}
   const mbFiltro=$('pag-filtro-mb')?.value||'',mesFiltro=$('pag-mes')?.value||'';
-  const pg=arr(DB.pags).filter(p=>(!mbFiltro||p.mbId===mbFiltro)&&(!mesFiltro||String(p.dt||'').startsWith(mesFiltro))).sort((a,b)=>String(b.dt||'').localeCompare(String(a.dt||'')));
+  const pg=pagamentosEquipeHistorico().filter(p=>(!mbFiltro||p.mbId===mbFiltro)&&(!mesFiltro||String(p.dt||'').startsWith(mesFiltro))).sort((a,b)=>String(b.dt||'').localeCompare(String(a.dt||'')));
   const total=pg.reduce((a,p)=>a+(+p.val||0),0);
   e.innerHTML=(pg.length?`<div class="card" style="padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;font-size:12px;color:var(--t2)"><span>${pg.length} pagamento(s) filtrado(s)</span><b style="color:var(--teal)">${fmt(total)}</b></div>`:'')+(pg.length?pg.slice(0,60).map(p=>`<div class="item ir">
     <div class="ih">
       <div style="flex:1">
         <div class="iname">${p.nome} <span class="bdg v" style="font-size:9px">${p.fn||''}</span></div>
-        <div class="imeta">${fmtD(p.dt)} · ${p.ref}${p.obs&&p.obs!==p.fn?' · '+p.obs:''}</div>
+        <div class="imeta">${fmtD(p.dt)} · ${p.ref}${p.obs&&p.obs!==p.fn?' · '+p.obs:''}${p.origem==='Pagamento via Dívidas'?' · <span style="color:var(--teal)">quitado em Dívidas</span>':''}</div>
       </div>
-      <div style="display:flex;align-items:center;gap:7px"><span style="font-size:14px;font-weight:700;color:var(--rose)">-${fmt(p.val)}</span><button class="btn sm del" title="Excluir pagamento" onclick="excluirPagamento('${p.id}')">×</button></div>
+      <div style="display:flex;align-items:center;gap:7px"><span style="font-size:14px;font-weight:700;color:var(--teal)">+${fmt(p.val)}</span>${p.origem==='Pagamento via Dívidas'?'':'<button class="btn sm del" title="Excluir pagamento" onclick="excluirPagamento(\''+p.id+'\')">×</button>'}</div>
     </div>
   </div>`).join(''):`<p class="empty">Nenhum pagamento corresponde aos filtros.</p>`);
 }
