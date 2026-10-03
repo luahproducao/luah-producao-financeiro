@@ -2707,6 +2707,17 @@ async function addPag(){
   DB.pags[id]={id,mbId,nome:mb.nome||'?',fn:mb.fn||'',val,dt:$('pdt').value||today(),ref:$('pref').value,showRef,showNome,obs:$('pobs')?.value.trim()||showNome};
   await save();$('pv').value='';if($('pobs'))$('pobs').value='';toast('Pagamento registrado');render();
 }
+async function criarDividaEquipe(mbId){
+  const m=DB.equipe[mbId];if(!m)return;
+  const saldo=+(calcSaldoMembro(m)).toFixed(2);
+  if(saldo<=0){toast('Este integrante não tem saldo pendente');return;}
+  let d=arr(DB.div).find(x=>x.equipeMbId===mbId&&((+x.total||0)-(+x.pago||0))>0);
+  if(d){d.total=+(+d.pago+saldo).toFixed(2);d.nome='Equipe — '+m.nome;d.obs='Saldo atualizado pelos shows da equipe';}
+  else {const id=uid();d=DB.div[id]={id,nome:'Equipe — '+m.nome,cat:'empresa',total:saldo,pago:0,pri:'alta',venc:'',pg:'',obs:'Saldo pendente dos shows de '+m.nome,equipeMbId:mbId,equipeNome:m.nome};}
+  await save();render();
+  go('fin');setTimeout(()=>{const tab=[...document.querySelectorAll('#v-fin .itab')].find(x=>(x.getAttribute('onclick')||'').includes("sub('fd'"));sub('fd',tab);setTimeout(()=>document.getElementById('ldiv-emp')?.scrollIntoView({behavior:'smooth',block:'start'}),0);},0);
+  toast('Saldo de '+m.nome+' entrou em Dívidas. Toque em Pagar.');
+}
 function prepararPagamentoEquipe(mbId){
   const m=DB.equipe[mbId];if(!m)return;
   const saldo=Math.max(0,calcSaldoMembro(m));
@@ -4843,7 +4854,8 @@ function rAgendaEquipe(){
     const cor=s.status==='recebido'?'var(--teal)':s.status==='nf'?'var(--vio2)':s.data<hoje?'var(--gold)':'var(--sky)';
     return `<div class="item ig" style="margin-bottom:8px"><div class="ih"><div style="flex:1;min-width:0"><div class="iname">${escH(s.nome)} ${serieDoShow(s)?'<span class="bdg v" style="font-size:9px">SÉRIE</span>':''}</div><div class="imeta">${fmtD(s.data)} · ${s.hora||'—'} · ${escH(s.local||'Local não informado')}</div><div style="font-size:11px;margin-top:5px;color:${cor}">${status} · Valor do músico: ${fmt(esc.val||0)}</div></div><button class="btn sm edit" onclick="abrirEditShow('${s.id}',true)">Editar</button></div></div>`;
   }).join('');
-  e.innerHTML=`<div class="card" style="padding:11px 12px;margin-bottom:10px"><b>${escH(m?.nome||'Integrante')}</b><div style="font-size:11px;color:var(--t3);margin-top:3px">${shows.length} show(s) encontrado(s) · toque em Editar para alterar somente a ocorrência</div></div>${cards||'<div class="empty">Nenhum show corresponde aos filtros.</div>'}`;
+  const saldo=Math.max(0,calcSaldoMembro(m||{}));
+  e.innerHTML=`<div class="card" style="padding:11px 12px;margin-bottom:10px"><b>${escH(m?.nome||'Integrante')}</b><div style="font-size:11px;color:var(--t3);margin-top:3px">${shows.length} show(s) encontrado(s) · toque em Editar para alterar somente a ocorrência</div>${saldo>0?`<button class="btn sm g" style="width:100%;margin-top:8px" onclick="criarDividaEquipe('${mbId}')">Pagar saldo devido · ${fmt(saldo)}</button>`:''}</div>${cards||'<div class="empty">Nenhum show corresponde aos filtros.</div>'}`;
 }
 function rAgendaMembro(mbId){
   const hoje=today();
@@ -4931,7 +4943,7 @@ function rEq(){
             </div>
             <div style="font-size:10px;color:var(--t3);margin-top:6px">Período ${mesFiltro}: ${fmt(devidoMes)} previsto · ${fmt(pagoMesM)} pago · ${fmt(devidoMes-pagoMesM)} pendente</div>
             ${saldo > 0 ? `<div style="background:rgba(176,98,80,.08);padding:8px;border-radius:8px;font-size:11px;color:var(--rose);margin-top:9px;font-weight:700">⚠️ ${m.nome.split(' ')[0]} deve receber ${fmt(saldo)}.</div>` : ''}
-            ${saldo > 0 ? `<button class="btn sm g" style="margin-top:8px;width:100%" onclick="prepararPagamentoEquipe('${m.id}')">Registrar pagamento de ${fmt(saldo)}</button>` : ''}
+            ${saldo > 0 ? `<button class="btn sm g" style="margin-top:8px;width:100%" onclick="criarDividaEquipe('${m.id}')">Pagar saldo devido · ${fmt(saldo)}</button>` : ''}
             ${detalhesHtml}
             ${agendaMembroHtml(m.id)}
             <button class="btn sm ghost" style="width:100%;margin-top:8px" onclick="abrirEditorShowsMembro('${m.id}')">Ver e editar shows deste músico</button>
