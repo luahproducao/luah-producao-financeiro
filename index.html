@@ -603,6 +603,7 @@ input::placeholder,textarea::placeholder{color:var(--t3)}
     <button class="itab"    onclick="sub('ss',this)">Séries</button>
     <button class="itab"    onclick="sub('sna',this)">+ Show</button>
     <button class="itab"    onclick="sub('sns',this)">+ Série</button>
+    <button class="itab"    style="color:var(--gold2);border-color:rgba(200,180,120,.35)" onclick="abrirImportarShowsImagem()">Imagem</button>
   </div><div id="pan-shows" style="display:none;margin:10px 0"></div>
   <div id="sa">
     <div class="card glass" style="padding:10px;margin-bottom:12px">
@@ -4533,6 +4534,10 @@ function rShows(){
 
 /* ─── LANÇAMENTO DE SHOW A PARTIR DE TEXTO ─────── */
 function abrirTextoShow(){ closeMore(); $('modal-texto-show').style.display='flex'; $('texto-show-input').focus(); }
+function abrirImportarShowsImagem(){
+  closeMore();$('modal-texto-show').style.display='flex';
+  setTimeout(()=>{$('img-shows-file')?.scrollIntoView({behavior:'smooth',block:'center'});$('img-shows-file')?.focus();},50);
+}
 function fecharTextoShow(){ $('modal-texto-show').style.display='none'; }
 function textoLinha(text,re){ const m=text.match(re); return m ? m[1].trim() : ''; }
 function dataTextoShow(v){
