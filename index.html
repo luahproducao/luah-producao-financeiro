@@ -2175,6 +2175,7 @@ window.addEventListener('load',()=>{
   toggleFC();
   ['sd','fdt','mdt','pdt'].forEach(id=>{const e=$(id);if(e)e.value=today();});
   renderConteudo();
+  restaurarEstadoVisual();
   setTimeout(initDiasSemana,700);
   compactarBackups(false);
   backupLocal();
@@ -2188,6 +2189,23 @@ window.addEventListener('pagehide',()=>{try{saveLocal();backupLocal();}catch(e){
 const SUBS=['sa','ss','sna','sns','el','ea','em','ep','ec','fm','fd','fs','fcar','fx','na','ne'];
 let curTab='dash';
 const ROTAS_PRINCIPAIS=['dash','shows','equipe','fin','equip','notas','rel','dig'];
+const UI_STATE_KEY='luah-estado-interface';
+const UI_FILTER_IDS=['f-show-mes','f-show-musico','f-show-busca','eq-busca','eq-filtro','eq-mes','pag-filtro-mb','pag-mes','f-filtro-mes','f-filtro-responsavel','f-filtro-cat'];
+function lerEstadoVisual(){try{return JSON.parse(localStorage.getItem(UI_STATE_KEY)||'{}')||{};}catch(e){return {};}}
+function salvarEstadoVisual(patch={}){
+  try{
+    const atual=lerEstadoVisual();
+    UI_FILTER_IDS.forEach(id=>{const el=$(id);if(el)atual.filters={...(atual.filters||{}),[id]:el.value||''};});
+    localStorage.setItem(UI_STATE_KEY,JSON.stringify({...atual,...patch}));
+  }catch(e){}
+}
+function restaurarEstadoVisual(){
+  const st=lerEstadoVisual();
+  UI_FILTER_IDS.forEach(id=>{const el=$(id),v=st.filters?.[id];if(el&&v!=null)el.value=v;});
+  const rota=ROTAS_PRINCIPAIS.includes(st.route)?st.route:'dash';
+  if(rota!=='dash')go(rota);
+  if(st.sub&&$(st.sub))sub(st.sub);
+}
 
 function irNovoShow(){go('shows');setTimeout(()=>sub('sna'),0)}
 function irFinancas(){go('fin');setTimeout(()=>sub('fm'),0)}
@@ -2202,6 +2220,7 @@ function go(id,btn){
   const navBtn=btn||[...document.querySelectorAll('.bnav-btn')].find(b=>(b.getAttribute('onclick')||'').includes("'"+id+"'"));
   if(navBtn)navBtn.classList.add('on');
   curTab=id;
+  salvarEstadoVisual({route:id,sub:''});
   document.getElementById('qbar').style.display=id==='fin'?'flex':'none';
   window.scrollTo({top:0,behavior:'smooth'});
   render();
@@ -2213,12 +2232,15 @@ function sub(id,btn){
   if(grupo){grupo.querySelectorAll('.itab').forEach(b=>b.classList.remove('on'));const ativo=btn||[...grupo.querySelectorAll('.itab')].find(b=>(b.getAttribute('onclick')||'').includes("'"+id+"'"));if(ativo)ativo.classList.add('on');}
   SUBS.forEach(s=>{const e=$(s);if(e)e.style.display='none';});
   target.style.display='block';
+  salvarEstadoVisual({route:curTab,sub:id});
   // Inicializar escalação ao abrir formulários de show
   if(id==='sna'){garantirArtista();setTimeout(()=>{autoEscala('s');renderEscala('s');},50);}
   if(id==='sns'){garantirArtista();setTimeout(()=>{autoEscala('r');renderEscala('r');},50);}
   render();
   if(id==='em')setTimeout(rAgendaEquipe,0);
 }
+document.addEventListener('input',e=>{if(UI_FILTER_IDS.includes(e.target?.id))salvarEstadoVisual();});
+document.addEventListener('change',e=>{if(UI_FILTER_IDS.includes(e.target?.id))salvarEstadoVisual();});
 
 /* ═══════ QUICK-ADD ═════════════════════════════ */
 async function qaAdd(){
@@ -4932,8 +4954,9 @@ function rEq(){
   const eq=arr(DB.equipe);
   const busca=($('eq-busca')?.value||'').trim().toLowerCase();
   const filtro=$('eq-filtro')?.value||'todos';
-  const mesFiltro=$('eq-mes')?.value||today().slice(0,7);
-  if($('eq-mes')&&!$('eq-mes').value)$('eq-mes').value=mesFiltro;
+  // Sem mês selecionado, a visão continua sequencial e considera todo o histórico.
+  // Isso evita que uma pendência antiga desapareça automaticamente na virada do mês.
+  const mesFiltro=$('eq-mes')?.value||'';
   const tP=eq.reduce((a,m)=>a+(m.perc||0),0);
   const mesAtual=today().slice(0,7);
   const totalPrev=eq.reduce((a,m)=>a+calcDevidoMembro(m),0);
@@ -4983,8 +5006,8 @@ function rEq(){
     const pago=calcPagoMembro(m);
     const saldo = Math.max(0,devido-pago);
     const dividaEquipe=arr(DB.div).find(d=>d.equipeMbId===m.id);
-    const devidoMes=calcDevidoMembro(m,mesAtual);
-    const pagoMesM=calcPagoMembro(m,mesAtual);
+    const devidoMes=calcDevidoMembro(m,mesFiltro);
+    const pagoMesM=calcPagoMembro(m,mesFiltro);
     const detalhes=detalhesShowsMembro(m.id);
     const detalhesHtml=detalhes.length?`<details style="margin-top:9px"><summary style="cursor:pointer;font-size:10px;font-weight:700;color:var(--vio2);text-transform:uppercase;letter-spacing:.6px">Ver valores por show (${detalhes.length})</summary><div style="display:flex;flex-direction:column;gap:4px;margin-top:6px">${detalhes.map(d=>`<div style="display:grid;grid-template-columns:1fr auto;gap:6px;background:var(--s3);border-radius:7px;padding:7px 9px;font-size:11px"><div><div style="color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fmtD(d.show.data)} · ${d.show.nome}</div><div style="color:var(--t3);margin-top:2px">Previsto ${fmt(d.previsto)} · Pago ${fmt(d.pago)}</div></div><b style="color:${d.previsto<=0?'var(--t3)':d.pendente>0?'var(--rose)':'var(--teal)'};align-self:center">${d.previsto<=0?'Sem valor':d.pendente>0?'Pendente '+fmt(d.pendente):'Pago'}</b></div>`).join('')}</div></details>`:'<div style="font-size:11px;color:var(--t3);margin-top:7px">Nenhum show escalado.</div>';
     return `<div class="item ig">
@@ -4998,7 +5021,7 @@ function rEq(){
               <div style="background:var(--s3);border-radius:7px;padding:6px;text-align:center"><div style="font-size:8px;color:var(--t3);text-transform:uppercase">Já pago</div><b style="font-size:12px;color:var(--teal)">${fmt(pago)}</b></div>
               <div style="background:var(--s3);border-radius:7px;padding:6px;text-align:center"><div style="font-size:8px;color:var(--t3);text-transform:uppercase">Pendente</div><b style="font-size:12px;color:${saldo>0?'var(--rose)':'var(--teal)'}">${fmt(saldo)}</b></div>
             </div>
-            <div style="font-size:10px;color:var(--t3);margin-top:6px">Período ${mesFiltro}: ${fmt(devidoMes)} previsto · ${fmt(pagoMesM)} pago · ${fmt(devidoMes-pagoMesM)} pendente</div>
+            <div style="font-size:10px;color:var(--t3);margin-top:6px">${mesFiltro?`Período ${mesFiltro}`:'Todos os períodos'}: ${fmt(devidoMes)} previsto · ${fmt(pagoMesM)} pago · ${fmt(devidoMes-pagoMesM)} pendente</div>
             ${saldo > 0 ? `<div style="background:rgba(176,98,80,.08);padding:8px;border-radius:8px;font-size:11px;color:var(--rose);margin-top:9px;font-weight:700">⚠️ ${m.nome.split(' ')[0]} deve receber ${fmt(saldo)}.</div>` : `<div style="background:rgba(70,180,155,.08);padding:8px;border-radius:8px;font-size:11px;color:var(--teal);margin-top:9px;font-weight:700">Pagamento em dia${dividaEquipe?' · dívida da equipe quitada':''}.</div>`}
             ${saldo > 0 ? `<button class="btn sm g" style="margin-top:8px;width:100%" onclick="criarDividaEquipe('${m.id}')">Pagar saldo devido · ${fmt(saldo)}</button>` : ''}
             ${detalhesHtml}
