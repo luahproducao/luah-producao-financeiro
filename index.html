@@ -1580,12 +1580,15 @@ function loadLocal(){
       DB = {shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{}, ...parsed};
     }
     try{const pend=JSON.parse(localStorage.getItem(PENDING_KEY)||'null');if(pend?.data)DB._queue=[pend];}catch(_e){}
+    // Se o estado principal foi substituído por um objeto vazio, não abrir a app
+    // como se fosse um primeiro acesso: tentar a cópia automática mais recente.
+    if(!temDados(DB)) restaurarUltimoBackupSilencioso();
   }catch(e){
     console.warn('loadLocal erro:',e);
     LU.lastError='Dados locais corrompidos ou indisponíveis';
     try{ localStorage.setItem('luah-producao-dados-corrompidos',localStorage.getItem(STORAGE_KEY)||''); }catch(_e){}
     DB = {shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{}};
-    toast('Dados locais inválidos. Use um backup para recuperar.','err');
+    if(!restaurarUltimoBackupSilencioso()) toast('Dados locais inválidos. Use um backup para recuperar.','err');
   }
 }
 function saveLocal(){
@@ -1631,6 +1634,25 @@ function mergeCloudKeepingLocalOnly(local,cloud){
 const BK_KEY='luah-backups', BK_MAX=60, BK_MAX_BYTES=2500000;
 function temDados(d){ d=d||DB; return Object.keys(d||{}).some(k=>!['_queue','_needsPush'].includes(k)&&d[k]&&typeof d[k]==='object'&&Object.keys(d[k]).length>0); }
 function listBackups(){ try{ return JSON.parse(localStorage.getItem(BK_KEY)||'[]'); }catch(e){ return []; } }
+function restaurarUltimoBackupSilencioso(){
+  try{
+    const b=listBackups().find(x=>x&&x.data&&temDados(JSON.parse(x.data)));
+    if(!b)return false;
+    const parsed=JSON.parse(b.data);
+    DB={shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{},...parsed};
+    LU.lastError='';
+    setTimeout(()=>toast('Os dados locais foram recuperados do backup de '+fmtD(b.dia)+'.','err'),250);
+    return true;
+  }catch(e){return false;}
+}
+function verificarViradaDoMes(){
+  const chave='luah-ultimo-mes-aberto', atual=today().slice(0,7), anterior=localStorage.getItem(chave);
+  localStorage.setItem(chave,atual);
+  if(anterior&&anterior!==atual&&temDados()){
+    backupLocal();
+    setTimeout(()=>toast('Novo mês: seu histórico continua salvo. Use o filtro “Todos os meses” para consultar períodos anteriores.'),350);
+  }
+}
 function compactarBackups(agressivo=false){
   try{
     let list=listBackups();
@@ -4242,7 +4264,7 @@ function escList(sh){
   if(typeof e==='object') return Object.keys(e).map(k=>{const v=e[k];return {mbId:k,nome:v.nome||v.m||k,val:+(v.val||0),fn:v.fn||''};});
   return [];
 }
-function render(){renderNotas();rPainelShows();rPainelFin();rPainelEq();renderLocaisSugestoes();rPainel();rDash();rShows();rSeries();rEq();rPags();rPagSel();rFin();rDivs();rEquip();renderRel();renderSaude();renderCartoes();}
+function render(){verificarViradaDoMes();renderNotas();rPainelShows();rPainelFin();rPainelEq();renderLocaisSugestoes();rPainel();rDash();rShows();rSeries();rEq();rPags();rPagSel();rFin();rDivs();rEquip();renderRel();renderSaude();renderCartoes();}
 
 function mudarMesCalendario(delta){
   const [y,m]=_calMesRef.split('-').map(Number); const d=new Date(y,m-1+delta,1); _calMesRef=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; renderCalendarioDash();
