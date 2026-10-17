@@ -42,9 +42,6 @@
 html,body{height:100%}
 body{background:var(--ink)}
 
-
-50%{opacity:.9}}
-
 .app-shell{position:relative;z-index:1}
 
 body{
@@ -1559,7 +1556,14 @@ async function jbFetchWithAuthFallback(url,key,options={}){
   let resposta=null;
   for(const modo of modos){
     localStorage.setItem('luah_jb_auth',modo);
-    resposta=await fetch(url,{...options,headers:jbHeaders(key,options.headers||{})});
+    const ctrl=options.signal?null:new AbortController();
+    const timer=ctrl?setTimeout(()=>ctrl.abort(),15000):null;
+    try{
+      resposta=await fetch(url,{...options,signal:options.signal||ctrl.signal,headers:jbHeaders(key,options.headers||{})});
+    }catch(e){
+      if(e?.name==='AbortError'&&!options.signal) resposta=new Response('',{status:408,statusText:'timeout'});
+      else throw e;
+    }finally{if(timer)clearTimeout(timer);}
     if(resposta.ok||![401,403].includes(resposta.status))break;
   }
   return resposta;
@@ -1580,6 +1584,7 @@ function loadLocal(){
       DB = {shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{}, ...parsed};
     }
     try{const pend=JSON.parse(localStorage.getItem(PENDING_KEY)||'null');if(pend?.data)DB._queue=[pend];}catch(_e){}
+    normalizarBanco();
     // Se o estado principal foi substituído por um objeto vazio, não abrir a app
     // como se fosse um primeiro acesso: tentar a cópia automática mais recente.
     if(!temDados(DB)) restaurarUltimoBackupSilencioso();
@@ -1588,10 +1593,12 @@ function loadLocal(){
     LU.lastError='Dados locais corrompidos ou indisponíveis';
     try{ localStorage.setItem('luah-producao-dados-corrompidos',localStorage.getItem(STORAGE_KEY)||''); }catch(_e){}
     DB = {shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{}};
+    normalizarBanco();
     if(!restaurarUltimoBackupSilencioso()) toast('Dados locais inválidos. Use um backup para recuperar.','err');
   }
 }
 function saveLocal(){
+  normalizarBanco();
   const fila=DB._queue?.length?DB._queue[DB._queue.length-1]:null;
   const estadoObj={...DB};delete estadoObj._queue;delete estadoObj._needsPush;
   const estado=JSON.stringify(estadoObj);
@@ -1609,6 +1616,15 @@ function snapshotPublic(d){
   const out=JSON.parse(JSON.stringify(d||{}));
   delete out._queue; delete out._needsPush;
   return out;
+}
+function normalizarBanco(){
+  const colecoes=['shows','series','fin','div','equip','equipe','pags','faturaPagamentos','meta','nfMensal'];
+  DB=DB&&typeof DB==='object'&&!Array.isArray(DB)?DB:{};
+  colecoes.forEach(k=>{if(!DB[k]||typeof DB[k]!=='object'||Array.isArray(DB[k]))DB[k]={};});
+  if(!Array.isArray(DB._queue))delete DB._queue;
+  arr(DB.fin).forEach(f=>{f.valor=Number.isFinite(+f.valor)?+f.valor:0;f.data=String(f.data||'');});
+  arr(DB.div).forEach(d=>{d.total=Number.isFinite(+d.total)?Math.max(0,+d.total):0;d.pago=Number.isFinite(+d.pago)?Math.max(0,+d.pago):0;if(!Array.isArray(d.pagamentos))d.pagamentos=[];});
+  arr(DB.pags).forEach(p=>{p.val=Number.isFinite(+p.val)?+p.val:0;p.dt=String(p.dt||'');});
 }
 function countRecords(v){ return v&&typeof v==='object' ? Object.keys(v).filter(k=>k!=='_queue'&&k!=='_needsPush').length : 0; }
 function mergeCloudKeepingLocalOnly(local,cloud){
@@ -1711,7 +1727,7 @@ let _saving = false;
 async function save(){
   // Persistência local é síncrona e protegida contra perda; a rede nunca deve
   // bloquear a resposta visual de um botão por vários segundos.
-  saveLocal();
+  if(!saveLocal()){syncUI(false,'armazenamento local indisponível — não foi possível salvar');return false;}
   const key = jbKey(), bin = jbBin();
   if(!key || !bin){ syncUI(false,'local'); return; }
   const novaOp={data: snapshotPublic(DB), id: Date.now()+'-'+Math.random().toString(36).slice(2,8)};
@@ -1719,7 +1735,7 @@ async function save(){
   // guardar dezenas de snapshots só enche o armazenamento do celular.
   DB._queue = _saving&&DB._queue?.length ? [DB._queue[0],novaOp] : [novaOp];
   DB._needsPush=false;
-  saveLocal();
+  if(!saveLocal()){syncUI(false,'armazenamento local indisponível — fila não gravada');return false;}
   if(!navigator.onLine){ syncUI(false,'off-line — '+(DB._queue||[]).length+' envio(s) na fila'); return; }
   syncUI(false,'salvando…');
   // Não aguardar a rede: os handlers podem renderizar e retornar imediatamente.
@@ -3444,7 +3460,7 @@ async function confirmarMsg(){
   toast(`${n} lançamento(s) salvo(s)!`);
 }
 let editFinId = null;
-function abrirEditFin(id){
+function abrirEditFinManual(id){
   const f = DB.fin[id]; if(!f) return;
   editFinId = id;
   $('ftp').value = f.tipo;
@@ -3506,8 +3522,9 @@ async function abaterDiv(id){
   const restante=Math.max(0,(+d.total||0)-(+d.pago||0));
   if(!restante){toast('Esta dívida já está quitada');return;}
   const campo=$('ab-'+id),digitado=String(campo?.value||'').trim();
-  const v=digitado?parseFloat(digitado):restante;
-  if(!v||v<0){toast('Informe um valor válido','err');return;}
+  const v=digitado?parseMoneyBR(digitado):restante;
+  if(!Number.isFinite(v)||v<=0){toast('Informe um valor válido','err');return;}
+  if(v>restante+0.005){toast('O pagamento não pode superar o saldo da dívida','err');return;}
   const pgto=$(('div-pgto-'+id))?.value||'pix';
   const dt=$(('div-data-'+id))?.value||today();
   d.pago=Math.min((+d.pago||0)+v,+d.total||v);
@@ -3952,8 +3969,9 @@ async function pagarDivSaude(id){
   const restante=Math.max(0,(+d.total||0)-(+d.pago||0));
   if(!restante){toast('Esta dívida já está quitada');return;}
   const campo=$('qs-'+id),digitado=String(campo?.value||'').trim();
-  const v=digitado?parseFloat(digitado):restante;
-  if(!v||v<0){toast('Informe um valor válido','err');return;}
+  const v=digitado?parseMoneyBR(digitado):restante;
+  if(!Number.isFinite(v)||v<=0){toast('Informe um valor válido','err');return;}
+  if(v>restante+0.005){toast('O pagamento não pode superar o saldo da dívida','err');return;}
   const pgto=$(('div-pgto-'+id))?.value||'pix';
   d.pago=Math.min((+d.pago||0)+v,+d.total||v);
   d.pagamentos=d.pagamentos||[]; d.pagamentos.push({id:uid(),valor:+v.toFixed(2),data:today(),pgto,obs:'Pagamento de dívida'});
