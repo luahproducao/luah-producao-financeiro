@@ -1617,14 +1617,30 @@ function snapshotPublic(d){
   delete out._queue; delete out._needsPush;
   return out;
 }
+function marcarExcluido(colecao,id){
+  if(!id)return;
+  DB._deleted=DB._deleted||{};
+  DB._deleted[colecao]=DB._deleted[colecao]||{};
+  DB._deleted[colecao][id]=Date.now();
+}
+function excluirRegistro(colecao,id){
+  if(DB[colecao]?.[id]){marcarExcluido(colecao,id);delete DB[colecao][id];return true;}
+  return false;
+}
+function aplicarTombstones(d=DB){
+  const t=d?._deleted||{};
+  Object.entries(t).forEach(([colecao,ids])=>Object.keys(ids||{}).forEach(id=>{if(d[colecao])delete d[colecao][id];}));
+  return d;
+}
 function normalizarBanco(){
-  const colecoes=['shows','series','fin','div','equip','equipe','pags','faturaPagamentos','meta','nfMensal'];
+  const colecoes=['shows','series','fin','div','equip','equipe','pags','faturaPagamentos','meta','nfMensal','_deleted'];
   DB=DB&&typeof DB==='object'&&!Array.isArray(DB)?DB:{};
   colecoes.forEach(k=>{if(!DB[k]||typeof DB[k]!=='object'||Array.isArray(DB[k]))DB[k]={};});
   if(!Array.isArray(DB._queue))delete DB._queue;
   arr(DB.fin).forEach(f=>{f.valor=Number.isFinite(+f.valor)?+f.valor:0;f.data=String(f.data||'');});
   arr(DB.div).forEach(d=>{d.total=Number.isFinite(+d.total)?Math.max(0,+d.total):0;d.pago=Number.isFinite(+d.pago)?Math.max(0,+d.pago):0;if(!Array.isArray(d.pagamentos))d.pagamentos=[];});
   arr(DB.pags).forEach(p=>{p.val=Number.isFinite(+p.val)?+p.val:0;p.dt=String(p.dt||'');});
+  aplicarTombstones(DB);
 }
 function countRecords(v){ return v&&typeof v==='object' ? Object.keys(v).filter(k=>k!=='_queue'&&k!=='_needsPush').length : 0; }
 function mergeCloudKeepingLocalOnly(local,cloud){
@@ -1633,7 +1649,7 @@ function mergeCloudKeepingLocalOnly(local,cloud){
   const preferLocal=Array.isArray(local?._queue)&&local._queue.length>0;
   let keptLocal=false;
   Object.keys(src).forEach(k=>{
-    if(k==='meta' || k==='imposto') return;
+    if(k==='meta' || k==='imposto' || k==='_deleted') return;
     const lv=src[k], cv=base[k];
     if(lv&&typeof lv==='object'&&!Array.isArray(lv)&&cv&&typeof cv==='object'&&!Array.isArray(cv)){
       const before=Object.keys(cv).length;
@@ -1641,6 +1657,7 @@ function mergeCloudKeepingLocalOnly(local,cloud){
       if(Object.keys(base[k]).length>before || preferLocal) keptLocal=true;
     }else if(cv===undefined){ base[k]=lv; keptLocal=true; }
   });
+  base._deleted={...(cloud?._deleted||{}),...(src._deleted||{})};
   if(src.meta||cloud?.meta) base.meta=preferLocal?{...(cloud?.meta||{}),...(src.meta||{})}:{...(src.meta||{}),...(cloud?.meta||{})};
   if(src.imposto||cloud?.imposto) base.imposto=preferLocal?{...(cloud?.imposto||{}),...(src.imposto||{})}:{...(src.imposto||{}),...(cloud?.imposto||{})};
   return {data:base,keptLocal};
@@ -1851,6 +1868,7 @@ async function pullFromCloud(){
     // Mesclar sem apagar registos locais que ainda não chegaram à nuvem.
     const merged=mergeCloudKeepingLocalOnly(DB,d);
     DB = {shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{}, ...merged.data};
+    aplicarTombstones(DB);
     cleanQueue();
     LU.cloudVer = ver;
     persistLU();
@@ -1935,6 +1953,7 @@ async function carregarJBInterno(){
       // O polling usa a mesma mesclagem segura do botão Atualizar.
       const merged=mergeCloudKeepingLocalOnly(DB,d);
       DB = {shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{}, ...merged.data};
+      aplicarTombstones(DB);
       if(!(DB._queue&&DB._queue.length)) cleanQueue();
       LU.cloudVer = ver;
       persistLU();
@@ -2278,7 +2297,7 @@ async function qaAdd(){
   // valor pode estar em qualquer posição — usar o primeiro número isolado ou o último
   const vm=limpo.match(/(\d[\d\.,]{2,})/);
   if(!vm){toast('Informe um valor. Ex: Gasolina 250','err');return;}
-  const v=parseFloat(vm[1].replace(/\./g,'').replace(',','.'))||0;if(!v){toast('Valor inválido','err');return;}
+  const v=parseMoneyBR(vm[1]);if(!Number.isFinite(v)||v<=0){toast('Valor inválido','err');return;}
   const nome=txt.replace(/R?\$\s*/g,'').replace(/no mercado livre/gi,'Mercado Livre').replace(/\bno\s+cart[ãa]o\s+(c6|nubank|inter|itau|bradesco|santander)/gi,'').replace(/\bno\s+(c6|nubank|inter|itau|bradesco|santander)\b/gi,'').replace(/\d[\d\.,]+/g,'').replace(/em\s*\d*x?/gi,'').replace(/parcelad[oa]?s?/gi,'').replace(/\bx\b/gi,'').replace(/^(compra|compras|pagamento|pago|gasto|gastos)\s+(de|do|da|de\s+uma|num|no|na)?\s*/i,'').replace(/\b(no|na|do|da|de|num|uma)\b/gi,'').replace(/\s{2,}/g,' ').trim()||'Gasto';
   const descFinal=(banco&&pgto.startsWith('credito')?banco+' — ':'')+nome;
   const id=uid();
@@ -2476,7 +2495,7 @@ function garantirArtista(){
     const ids=new Set(duplicados.map(m=>m.id));
     Object.values(DB.shows||{}).forEach(sh=>(sh.escalacao||[]).forEach(x=>{if(ids.has(x.mbId)){x.mbId=principal.id;x.nome=principal.nome;x.fn=principal.fn;mudou=true;}}));
     Object.values(DB.pags||{}).forEach(pg=>{if(ids.has(pg.mbId)){pg.mbId=principal.id;pg.nome=principal.nome;pg.fn=principal.fn;mudou=true;}});
-    duplicados.forEach(m=>{delete DB.equipe[m.id];mudou=true;});
+    duplicados.forEach(m=>{excluirRegistro('equipe',m.id);mudou=true;});
   }
   if(mudou){ saveLocal(); clearTimeout(window._dedupeArtistaTimer); window._dedupeArtistaTimer=setTimeout(()=>save(),250); }
 }
@@ -2553,7 +2572,7 @@ function gerarSerie(sid){
       const pz=isNaN(+s.prazo)?30:+s.prazo;
       const termo = s.termo || '30';
       const recData = termo === 'vista' ? ds : (termo === '50-50' ? ds : (termo === 'permuta' ? ds : addDays(ds, pz)));
-      DB.shows[id]={id,nome:s.nome,data:ds,hora:s.hora,valor:s.valor,liq:s.liq,imp:s.imp,prazo:pz,termo,tipo:s.tipo,obs:'',local:s.local||'',status:'agendado',recData,serie:true,serieId:sid,falta:[],escalacao:(s.escalacao||[]).map(x=>({...x}))};
+      DB.shows[id]={id,nome:s.nome,data:ds,hora:s.hora,valor:s.valor,liq:s.liq,imp:s.imp,prazo:pz,termo,tipo:s.tipo,obs:'',local:s.local||'',status:'agendado',recData,serie:true,serieId:sid,manualOverride:false,falta:[],escalacao:(s.escalacao||[]).map(x=>({...x}))};
     }
     cur.setDate(cur.getDate()+7);n++;
   }
@@ -2566,7 +2585,7 @@ async function cancelarOc(showId){
   if(s){s.cancelados=s.cancelados||[];s.cancelados.push(sh.data);}
   DB.shows[showId].status='cancelado';await save();render();
 }
-async function delShow(id){if(!confirm('Remover show?'))return;delete DB.shows[id];await save();render();toast('Show removido');}
+async function delShow(id){if(!confirm('Remover show?'))return;excluirRegistro('shows',id);await save();render();toast('Show removido');}
 
 function detetarBanco(f){const d=(f.desc||'').toLowerCase();for(const b of FINTX_BANCOS){if(b.re.test(d))return b.nome;}return 'Outros';}
 // Anti-duplicação (v20): compras a crédito + fatura total do mesmo cartão não somam duas vezes
@@ -2645,7 +2664,7 @@ function aplicarEscalacaoSerieAosShows(sid){
   Object.values(DB.shows||{}).forEach(sh=>{
     // Aplicar a alteração em lote também aos shows já gerados da série;
     // shows cancelados continuam preservados como histórico e não são reativados.
-    if(sh.serieId===sid&&sh.status!=='cancelado'){
+    if(sh.serieId===sid&&sh.status!=='cancelado'&&!sh.manualOverride){
       sh.escalacao=(serie.escalacao||[]).map(x=>({...x}));
       sh.valor=serie.valor; sh.liq=serie.liq; sh.imp=serie.imp; sh.prazo=serie.prazo; sh.termo=serie.termo; sh.recData=serie.termo==='vista'||serie.termo==='50-50'||serie.termo==='permuta'?sh.data:addDays(sh.data,+(serie.prazo||30));
     }
@@ -2681,8 +2700,8 @@ async function salvarSerie(){
 
 async function delSerie(id){
   if(!confirm('Excluir série e shows futuros?'))return;
-  Object.keys(DB.shows).forEach(k=>{if(DB.shows[k].serieId===id&&DB.shows[k].data>=today())delete DB.shows[k];});
-  delete DB.series[id];await save();render();toast('Série removida');
+  Object.keys(DB.shows).forEach(k=>{if(DB.shows[k].serieId===id&&DB.shows[k].data>=today())excluirRegistro('shows',k);});
+  excluirRegistro('series',id);await save();render();toast('Série removida');
 }
 function waEquipe(showId){
   const sh=DB.shows[showId];if(!sh)return;
@@ -2756,14 +2775,16 @@ function propagarMembroEditado(id,dadosNovos){
   });
   if(DB.series){Object.values(DB.series).forEach(se=>{
     (se.equipeIds||[]); // ids apenas
-    (se.escalacao||[]).forEach(x=>{ if(x.mbId===id){ x.fn=dadosNovos.fn; x.nome=dadosNovos.nome; x.val=dadosNovos.val; }});
+    (se.escalacao||[]).forEach(x=>{ if(x.mbId===id){ x.fn=dadosNovos.fn; x.nome=dadosNovos.nome; if(!x.manual)x.val=dadosNovos.val; }});
   });}
 }
 async function salvarMembro(){
   const nome=$('mn').value.trim();if(!nome){toast('Informe o nome','err');return;}
+  const val=parseMoneyBR($('mv').value),perc=parseMoneyBR($('mp').value),ref=parseMoneyBR($('mref').value),pro=parseMoneyBR($('mpro').value),proP=parseMoneyBR($('mproP').value);
+  if([val,perc,ref,pro,proP].some(x=>!Number.isFinite(x)||x<0)||perc>100||proP>100){toast('Valores e percentuais da equipe devem ser positivos; percentuais até 100%','err');return;}
   if(!editMembroId){ await addMembro(); return; }
   const d=DB.equipe[editMembroId];
-  const novo={id:d.id,nome,fn:$('mf').value,val:+$('mv').value||0,perc:+$('mp').value||0,ref:+$('mref').value||0,pro:+$('mpro').value||0,proP:+$('mproP').value||0,wa:$('mwa').value.trim()};
+  const novo={id:d.id,nome,fn:$('mf').value,val,perc,ref,pro,proP,wa:$('mwa').value.trim()};
   DB.equipe[editMembroId]=novo;
   propagarMembroEditado(editMembroId,novo);
   limparFormMembro();
@@ -2771,20 +2792,28 @@ async function salvarMembro(){
 }
 async function addMembro(){
   const nome=$('mn').value.trim();if(!nome){toast('Informe o nome','err');return;}
+  const val=parseMoneyBR($('mv').value),perc=parseMoneyBR($('mp').value),ref=parseMoneyBR($('mref').value),pro=parseMoneyBR($('mpro').value),proP=parseMoneyBR($('mproP').value);
+  if([val,perc,ref,pro,proP].some(x=>!Number.isFinite(x)||x<0)||perc>100||proP>100){toast('Valores e percentuais da equipe devem ser positivos; percentuais até 100%','err');return;}
   const chave=nome.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ');
   const existente=arr(DB.equipe).find(m=>String(m.nome||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ')===chave);
   if(existente){toast(`${existente.nome} já está cadastrado na equipe`,'err');editarMembro(existente.id);return;}
   const id=uid();
-  DB.equipe[id]={id,nome,fn:$('mf').value,val:+$('mv').value||0,perc:+$('mp').value||0,ref:+$('mref').value||0,pro:+$('mpro').value||0,proP:+$('mproP').value||0,wa:$('mwa').value.trim()};
+  DB.equipe[id]={id,nome,fn:$('mf').value,val,perc,ref,pro,proP,wa:$('mwa').value.trim()};
    await save();limparFormMembro();toast('Membro adicionado!');render();
 }
-async function delMembro(id){if(!confirm('Remover?'))return;delete DB.equipe[id];if(editMembroId===id)limparFormMembro();await save();render();toast('Membro removido');}
+async function delMembro(id){if(!confirm('Remover?'))return;excluirRegistro('equipe',id);if(editMembroId===id)limparFormMembro();await save();render();toast('Membro removido');}
 async function addPag(){
-  const mbId=$('pmb').value,val=+$('pv').value||0;
+  const mbId=$('pmb').value,val=parseMoneyBR($('pv').value);
   if(!mbId||!(val>0)){toast('Selecione membro e informe um valor maior que zero','err');return;}
   const mb=DB.equipe[mbId]||{};
   const showRef=$('pshow')?.value||'';
   const showNome=showRef&&DB.shows[showRef]?DB.shows[showRef].nome:'';
+  if(showRef){
+    const show=DB.shows[showRef],esc=escList(show).find(x=>x.mbId===mbId);
+    const previsto=+(esc?.val||0),pago=arr(DB.pags).filter(p=>p.showRef===showRef&&p.mbId===mbId).reduce((a,p)=>a+(+p.val||0),0);
+    if(previsto<=0){toast('Este integrante não tem valor previsto neste show','err');return;}
+    if(val>Math.max(0,previsto-pago)+0.005){toast('O pagamento supera o saldo previsto para este show','err');return;}
+  }
   const id=uid();
   DB.pags[id]={id,mbId,nome:mb.nome||'?',fn:mb.fn||'',val,dt:$('pdt').value||today(),ref:$('pref').value,showRef,showNome,obs:$('pobs')?.value.trim()||showNome};
   await save();$('pv').value='';if($('pobs'))$('pobs').value='';toast('Pagamento registrado');render();
@@ -2816,7 +2845,7 @@ function prepararPagamentoEquipe(mbId){
 async function excluirPagamento(id){
   const p=DB.pags?.[id];if(!p)return;
   if(!confirm('Excluir este pagamento de '+(p.nome||'membro')+' no valor de '+fmt(p.val)+'?'))return;
-  delete DB.pags[id];await save();render();toast('Pagamento excluído');
+  excluirRegistro('pags',id);await save();render();toast('Pagamento excluído');
 }
 function calcNota(){
   const nota=+$('cnota').value||0;
@@ -2951,8 +2980,8 @@ function parseFinTXT(t0,opts={}){
 
   let valor=0;
   const numCtx=tSemParc.match(/(?:de|por|compra|valor|\$|r\$|pago|pagamento)\s+(\d[\d\.\,]*)/i);
-  if(numCtx)valor=parseFloat(numCtx[1].replace(/\./g,'').replace(',','.'));
-  if(!valor){for(const raw of vals){const v=parseFloat(raw.replace(/\./g,'').replace(',','.'));if(v>valor)valor=v;}}
+  if(numCtx)valor=parseMoneyBR(numCtx[1]);
+  if(!valor){for(const raw of vals){const v=parseMoneyBR(raw);if(v>valor)valor=v;}}
   let banco=null;
   for(const b of FINTX_BANCOS){if(b.re.test(t)){banco=b.nome;break;}}
   const temCartao=/cart[aã]o/i.test(t)||banco;
@@ -2975,7 +3004,7 @@ function parseFinTXT(t0,opts={}){
   let div=null;
   const dvm=t.match(/(?:abater|pagar|pago|pagamento|parcela|entrada)\s+(?:da|do|de\s+)?(?:dívida|divida)\s+(.+?)(?:\s+(?:de|por|no valor de)\s+)?(\d[\d\.,]*)\s*$/i)
     ||t.match(/(?:dívida|divida)\s+(.+?)(?:\s+(?:de|por|no valor de)\s+)?(\d[\d\.,]*)\s*$/i);
-  if(dvm){const valorDiv=parseFloat((dvm[2]||'0').replace(/\./g,'').replace(',','.'));div={nome:fintxLimparNome(dvm[1]),valor:valorDiv||valor};divAcao='abater';divNome=div.nome;}
+  if(dvm){const valorDiv=parseMoneyBR(dvm[2]||'0');div={nome:fintxLimparNome(dvm[1]),valor:valorDiv||valor};divAcao='abater';divNome=div.nome;}
   if(eEmprestimo){
     const alvo=t.match(/(?:para|pra)\s+(?:pagar|cobrir|quitar)\s+(.+?)(?:\s+(?:de|por)\s+\d[\d\.,]*)?$/i);
     divNome=fintxLimparNome(alvo?.[1]||'Empréstimo');
@@ -3026,6 +3055,7 @@ function gerarParcelasFin(txt,opts={}){
     const data=`${a}-${String(m+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
     const cat = p.banco?'Cartão de crédito':inferCat(p.nome);
     parcelas.push({tipo:p.tipo,valor:valorP,desc:n>1?`${p.desc} (${i+1}/${n})`:p.desc,data,cat,rec:p.tipo==='rec'?'receita':'variavel',pgto:p.pgto,parc:n>1?n:null,secao:p.secao||'desp',divId:p.div?p.div.nome:null,divAcao:p.divAcao||null,divNome:p.divNome||null,divPeriodicidade:p.divPeriodicidade||'',divVenc:p.divVenc||'',responsavel:p.responsavel||detectarResponsavel(txt)});}
+  if(n>1){const dif=+(p.valor-parcelas.reduce((a,x)=>a+x.valor,0)).toFixed(2);if(Math.abs(dif)>0.001)parcelas[parcelas.length-1].valor=+(parcelas[parcelas.length-1].valor+dif).toFixed(2);}
     if(window._finTxtForcaPgto==='pix'||window._finTxtForcaPgto==='dinheiro'||window._finTxtForcaPgto==='debito'||window._finTxtForcaPgto==='credito-vista'){
     parcelas.forEach(p=>{p.pgto=window._finTxtForcaPgto;p.banco=null;if(window._finTxtForcaPgto!=='credito-vista')p.cat=p.secao==='casa'?'Alimentação':'Outro';});
   }
@@ -3118,10 +3148,16 @@ async function confirmarFinTXT(){
       const id=uid();DB.div[id]={id,nome:nomeDiv,cat:ps[0].secao==='casa'?'casa':'empresa',total:ps.reduce((a,b)=>a+b.valor,0),pago:0,pri:'media',obs:'Cadastrada por texto inteligente'};
       divObj=DB.div[id];
     }
-    for(const p of ps){divObj.pago=+(Math.min((divObj.pago||0)+p.valor,divObj.total)).toFixed(2);}
+    for(const p of ps){
+      const restante=Math.max(0,(+divObj.total||0)-(+divObj.pago||0));
+      const abatimento=Math.min(+p.valor||0,restante);
+      divObj.pago=+(+divObj.pago+abatimento).toFixed(2);
+      divObj.pagamentos=divObj.pagamentos||[];
+      if(abatimento>0)divObj.pagamentos.push({id:uid(),valor:+abatimento.toFixed(2),data:p.data||today(),pgto:p.pgto||'',obs:'Pagamento por lançamento inteligente'});
+    }
     nDiv=ps.length;
   }
-  for(const p of ps){const id=uid();const {secao,divId,divAcao,divNome,divPeriodicidade,divVenc,...rest}=p;DB.fin[id]={id,...rest,tipo:p.tipo||secao||'desp'};if(divCriada)DB.fin[id].financiadoPorDividaId=divCriada.id;}
+  for(const p of ps){const id=uid();const {secao,divId,divAcao,divNome,divPeriodicidade,divVenc,...rest}=p;DB.fin[id]={id,...rest,tipo:p.tipo||secao||'desp'};if(divCriada)DB.fin[id].financiadoPorDividaId=divCriada.id;if(p.divAcao==='abater'||p.divId)DB.fin[id].pagamentoDivida=true;}
   window._finTxtPend=null;$('ft-txt').value='';
    await save();render();$('ft-prev').innerHTML='';
   toast(nDiv?`${n} lançamento(s) salvo(s) — dívida "${ps[0].divNome||ps[0].divId||divCriada?.nome}" registrada/atualizada!`:`${n} lançamento(s) salvo(s)!`);
@@ -3483,8 +3519,8 @@ function abrirEditFinManual(id){
 }
 
 async function addFin(){
-  const tipo=$('ftp').value,val=+$('fv').value||0;
-  if(!val){toast('Informe o valor','err');return;}
+  const tipo=$('ftp').value,val=parseMoneyBR($('fv').value);
+  if(!Number.isFinite(val)||val<=0){toast('Informe um valor positivo','err');return;}
   const cat=tipo==='casa'?$('fc2').value:$('fc').value;
   const desc = $('fdesc').value.trim() || cat;
   const dt = $('fdt').value || today();
@@ -3508,7 +3544,7 @@ async function addFin(){
   await save(); render();
   ['fdesc','fv','fparc'].forEach(i=>$(i).value='');
 }
-async function delFin(id){if(!confirm('Remover?'))return;delete DB.fin[id];await save();render();toast('Lançamento removido');}
+async function delFin(id){if(!confirm('Remover?'))return;excluirRegistro('fin',id);await save();render();toast('Lançamento removido');}
 async function addDiv(){
   const nome=$('dvn').value.trim(),total=+$('dvt').value||0;
   if(!nome||!total){toast('Preencha nome e valor','err');return;}
@@ -3534,7 +3570,7 @@ async function abaterDiv(id){
   await save();toast('Pagamento registrado como quitado · '+rotuloFormaPagamento(pgto));render();
 }
 function rotuloFormaPagamento(pgto){return ({pix:'Pix',dinheiro:'Dinheiro',debito:'Débito','credito-vista':'Crédito à vista','credito-parcelado':'Crédito parcelado'})[pgto]||pgto||'não informado';}
-async function delDiv(id){if(!confirm('Remover?'))return;delete DB.div[id];await save();render();toast('Dívida removida');}
+async function delDiv(id){if(!confirm('Remover?'))return;excluirRegistro('div',id);await save();render();toast('Dívida removida');}
 
 function abrirEditDiv(id){
   const d=DB.div[id];if(!d)return;
@@ -3609,7 +3645,7 @@ async function addEco(id){
   const v=parseFloat($('eco-'+id).value)||0;if(!v)return;
    DB.equip[id].eco=Math.min(DB.equip[id].eco+v,DB.equip[id].preco); await save();toast('Valor adicionado ao fundo');render();
 }
-async function delEquip(id){if(!confirm('Remover?'))return;delete DB.equip[id];await save();render();toast('Equipamento removido');}
+async function delEquip(id){if(!confirm('Remover?'))return;excluirRegistro('equip',id);await save();render();toast('Equipamento removido');}
 async function saveMedia(){DB.meta.mediaShow=+$('eqmed').value||0;await save();}
 
 /* ═══════ RELATÓRIO ═════════════════════════════ */
@@ -4059,7 +4095,7 @@ async function salvarEditShow(){
   const recData = termo === 'vista' ? data : (termo === '50-50' ? data : (termo === 'permuta' ? data : addDays(data, prazo)));
   syncParcelasShow('es');
   const statusReceb=_recebTemp.es.some(p=>p.status==='recebida')&&showRecebido({...DB.shows[id],valor,recebimentos:_recebTemp.es})>=+(valor*(1-ImpostoConfig())).toFixed(2)?'recebido':$('es-status').value;
-  Object.assign(DB.shows[id],{nome:$('es-nome').value.trim(),local:$('es-local').value.trim(),data,hora:$('es-hora').value||'20:00',valor,liq:+(valor*(1-ImpostoConfig())).toFixed(2),imp:+(valor*ImpostoConfig()).toFixed(2),prazo,termo,tipo:$('es-tipo').value,status:statusReceb,nfEmitida:!!(DB.shows[id].nfEmitida||$('es-status').value==='nf'||statusReceb==='recebido'),recebimentos:_recebTemp.es,obs:$('es-obs').value.trim(),recData,falta:!valor?['valor']:[],escalacao});
+  Object.assign(DB.shows[id],{nome:$('es-nome').value.trim(),local:$('es-local').value.trim(),data,hora:$('es-hora').value||'20:00',valor,liq:+(valor*(1-ImpostoConfig())).toFixed(2),imp:+(valor*ImpostoConfig()).toFixed(2),prazo,termo,tipo:$('es-tipo').value,status:statusReceb,nfEmitida:!!(DB.shows[id].nfEmitida||$('es-status').value==='nf'||statusReceb==='recebido'),recebimentos:_recebTemp.es,obs:$('es-obs').value.trim(),recData,falta:!valor?['valor']:[],escalacao,manualOverride:!!DB.shows[id].serieId});
   guardarLocal($('es-local').value);await save();fecharModalShow();
   toast('Show atualizado'+(escalacao.length?' · '+escalacao.length+' membro(s) escalado(s)':''));render();
 }
@@ -4663,6 +4699,7 @@ function calcNfMes(serieId, mesRef){
   const shows = arr(DB.shows).filter(s =>
     s.serieId === serieId &&
     s.status !== 'cancelado' &&
+    !arr(DB.nfMensal).some(n=>n.tipo==='show'&&n.status!=='cancelada'&&n.serieId===serieId&&n.mesRef===mesRef&&n.showId===s.id) &&
     new Date(s.data+'T12:00').getFullYear() === y &&
     new Date(s.data+'T12:00').getMonth() === m-1
   );
@@ -4679,8 +4716,9 @@ async function emitirNfMensal(serieId, mesRef, dtEmissao, dtPrazoFinanceiro, des
   const calc = calcNfMes(serieId, mesRef);
   if(!calc.qtShows){ toast('Nenhum show desta série neste mês','err'); return; }
   if(!DB.nfMensal) DB.nfMensal = {};
-  const individuais=arr(DB.nfMensal).filter(n=>n.serieId===serieId&&n.mesRef===mesRef&&n.tipo==='show');
-  if(individuais.length&&!confirm('Já existem '+individuais.length+' NF(s) individual(is) neste mês. Emitir a NF mensal também pode duplicar o faturamento. Continuar?')) return;
+  if(DB.nfMensal[key]&&DB.nfMensal[key].status!=='cancelada'){toast('A NF mensal desta série e mês já existe. Edite ou remova a NF existente antes de emitir outra.','err');return;}
+  const individuais=arr(DB.nfMensal).filter(n=>n.serieId===serieId&&n.mesRef===mesRef&&n.tipo==='show'&&n.status!=='cancelada');
+  if(individuais.length&&!calc.qtShows){toast('Todos os shows deste mês já possuem NF individual. Não há saldo para uma NF mensal.','err');return;}
   DB.nfMensal[key] = {
     id: key, serieId, mesRef,
     dtEmissao,
@@ -4704,8 +4742,9 @@ async function emitirNfShow(serieId, mesRef, showId, dtEmissao, dtPrazoFinanceir
   if(!s){ toast('Show não encontrado','err'); return; }
   const key = nfShowKey(serieId, mesRef, showId);
   if(!DB.nfMensal) DB.nfMensal = {};
+  if(DB.nfMensal[key]&&DB.nfMensal[key].status!=='cancelada'){toast('Este show já possui uma NF individual.','err');return;}
   const mensal=nfKey(serieId,mesRef);
-  if(DB.nfMensal[mensal]&&DB.nfMensal[mensal].status!=='cancelada'&&!confirm('Já existe uma NF mensal desta série neste mês. Emitir uma NF individual também pode duplicar o faturamento. Continuar?')) return;
+  if(DB.nfMensal[mensal]&&DB.nfMensal[mensal].status!=='cancelada'){toast('Já existe uma NF mensal para esta série e mês. Emita a NF individual somente após remover ou cancelar a NF mensal.','err');return;}
   DB.nfMensal[key] = {
     id: key, serieId, mesRef, showId,
     dtEmissao,
@@ -4755,7 +4794,7 @@ function gerarPagamentosEquipeDaNota(nf){
 
 async function delNfMensal(key){
   if(!confirm('Remover registro desta NF?')) return;
-   delete DB.nfMensal[key]; await save(); render();
+   excluirRegistro('nfMensal',key); await save(); render();
 }
 
 function calcDevidoMembro(m,mesRef=''){
@@ -5142,11 +5181,11 @@ function toggleSelFin(on){
   s2.forEach(f=>{if(on)_selFin[f.id]=1;else delete _selFin[f.id];});
   render();
 }
-function delSelFin(){
+async function delSelFin(){
   const ids=Object.keys(_selFin);if(!ids.length){toast('Nenhum lançamento selecionado','err');return;}
   if(!confirm(`Excluir ${ids.length} lançamento(s)?`))return;
-  ids.forEach(id=>{delete DB.fin[id];delete _selFin[id];});
-  save();render();toast(`${ids.length} lançamento(s) excluído(s)`);
+  ids.forEach(id=>{excluirRegistro('fin',id);delete _selFin[id];});
+  await save();render();toast(`${ids.length} lançamento(s) excluído(s)`);
 }
 let _imgFinRows=[];
 function toggleImgNotaModo(){const nota=$('img-fin-tipo')?.value==='nota';if($('img-nota-modo-g'))$('img-nota-modo-g').style.display=nota?'block':'none';}
