@@ -1275,6 +1275,11 @@ Tempo: Uma hora e meia de show"></textarea>
       <button class="btn sm ghost" onclick="$('imp-file').click()">Importar dados</button>
       <input type="file" id="imp-file" accept="application/json" style="display:none" onchange="importarDados(this)">
     </div>
+    <div style="margin:12px 0;padding:12px;background:rgba(176,98,80,.08);border:1px solid rgba(176,98,80,.28);border-radius:var(--rs)">
+      <div style="font-size:12px;font-weight:700;color:var(--rose);margin-bottom:5px">Começar uma nova base</div>
+      <div style="font-size:11px;color:var(--t2);line-height:1.5;margin-bottom:8px">Guarda outubro em um arquivo, limpa a fila pendente deste aparelho e desconecta o Bin antigo. O banco antigo não será apagado.</div>
+      <button class="btn sm" style="width:100%;background:rgba(176,98,80,.16);color:var(--rose);border:1px solid rgba(176,98,80,.35)" onclick="iniciarNovaBase()">Arquivar e iniciar base nova</button>
+    </div>
     <div id="bk-list"></div>
     <div style="height:10px"></div>
     <button class="btn ghost" onclick="fecharBackup()">Fechar</button>
@@ -2111,6 +2116,27 @@ function renderBackupList(){
   const list = listBackups();
   if(!list.length){ c.innerHTML='<div style="font-size:13px;color:var(--t2);padding:14px 4px">Ainda não há backups. As cópias são guardadas automaticamente após alterações, a cada 5 minutos e ao sair do aplicativo.</div>'; return; }
   c.innerHTML = list.map(b => '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 12px;background:var(--s3);border:1px solid var(--line);border-radius:var(--rs);margin-bottom:8px"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">Backup de '+fmtD(b.dia)+'</div><div style="font-size:11px;color:var(--t2)">'+new Date(b.ts).toLocaleString('pt-BR')+'</div></div><button class="btn pri" style="font-size:12px;padding:8px 12px" onclick="restoreFromBackup('+b.ts+')">Restaurar</button></div>').join('');
+}
+function iniciarNovaBase(){
+  const qtd={shows:Object.keys(DB.shows||{}).length,fin:Object.keys(DB.fin||{}).length,div:Object.keys(DB.div||{}).length,equipe:Object.keys(DB.equipe||{}).length};
+  const agora=new Date(),prox=new Date(agora.getFullYear(),agora.getMonth()+1,1);
+  const nomeMes=M[agora.getMonth()]+'/'+agora.getFullYear(),proximoMes=M[prox.getMonth()]+'/'+prox.getFullYear();
+  if(!confirm(`Arquivar ${nomeMes} e iniciar uma base limpa para ${proximoMes}?\n\nSerão arquivados: ${qtd.shows} show(s), ${qtd.fin} lançamento(s), ${qtd.div} dívida(s) e ${qtd.equipe} integrante(s).\n\nO backup será baixado, a fila pendente será limpa somente deste aparelho e o Bin antigo NÃO será apagado.`))return;
+  try{
+    const arquivo={tipo:'luah-arquivo-mensal',versao:1,arquivadoEm:new Date().toISOString(),periodo:nomeMes,dados:snapshotPublic(DB),filaPendente:DB._queue||[]};
+    const blob=new Blob([JSON.stringify(arquivo,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download=`luah-arquivo-${agora.getFullYear()}-${String(agora.getMonth()+1).padStart(2,'0')}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    // Preservar também uma cópia interna para restauração futura, sem apagar os backups existentes.
+    try{localStorage.setItem('luah-arquivo-'+Date.now(),JSON.stringify(arquivo));}catch(_e){}
+    DB={shows:{},series:{},fin:{},div:{},equip:{},equipe:{},pags:{},faturaPagamentos:{},meta:{},nfMensal:{}};
+    cleanQueue();
+    ['luah_jb_key','luah_jb_bin','luah_jb_auth'].forEach(k=>localStorage.removeItem(k));
+    LU={cloudVer:0};persistLU();
+    localStorage.removeItem(UI_STATE_KEY);saveLocal();garantirArtista();saveLocal();
+    fecharBackup();render();
+    setTimeout(()=>{abrirSetupConexao();modoSetup('novo');const e=$('jb-err');if(e){e.textContent=`Base nova pronta para ${proximoMes}. Informe a API Key e deixe o Bin ID vazio para criar um banco novo.`;e.style.display='block';}},150);
+    toast(`Base de ${proximoMes} criada. O arquivo de ${nomeMes} foi baixado.`);
+  }catch(e){toast('Não foi possível iniciar a base nova. Faça primeiro um backup manual.','err');}
 }
 
 function pularFbSetup(){
